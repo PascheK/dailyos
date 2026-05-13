@@ -1,0 +1,4 @@
+provider: github
+owner: paschek7
+repo: dailyos
+updaterCacheDirName: dailyos-updater

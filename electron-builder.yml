@@ -1,0 +1,78 @@
+appId: com.killian.dailyos
+productName: DailyOS
+copyright: Copyright © 2026 Killian Pasche
+
+directories:
+  buildResources: resources
+  output: dist
+
+files:
+  - out/**/*
+  - '!out/**/*.map'
+  - '!**/.vscode/*'
+  - '!src/*'
+  - '!electron.vite.config.{js,ts,mjs,cjs}'
+  - '!{.eslintcache,eslint.config.mjs,.prettierignore,.prettierrc.yaml,dev-app-update.yml,CHANGELOG.md,README.md}'
+  - '!{.env,.env.*,.npmrc,pnpm-lock.yaml}'
+  - '!{tsconfig.json,tsconfig.node.json,tsconfig.web.json}'
+
+asarUnpack:
+  - node_modules/better-sqlite3/**/*
+  - node_modules/bindings/**/*
+  - node_modules/file-uri-to-path/**/*
+  - node_modules/node-gyp-build/**/*
+
+# ── macOS ──────────────────────────────────────────────────────────────────
+mac:
+  target:
+    - target: dmg
+      arch: [arm64, x64]
+    - target: zip
+      arch: [arm64, x64]
+  category: public.app-category.productivity
+  icon: resources/icon.png
+  darkModeSupport: true
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: resources/entitlements.mac.plist
+  entitlementsInherit: resources/entitlements.mac.plist
+  notarize: false
+
+dmg:
+  artifactName: ${productName}-${version}-${arch}.${ext}
+  title: ${productName} ${version}
+  window:
+    width: 540
+    height: 380
+
+# ── Windows ────────────────────────────────────────────────────────────────
+win:
+  target:
+    - target: nsis
+      arch: [x64]
+  icon: resources/icon.png
+
+nsis:
+  artifactName: ${productName}-${version}-setup.${ext}
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  createDesktopShortcut: true
+  createStartMenuShortcut: true
+  shortcutName: ${productName}
+  uninstallDisplayName: ${productName}
+
+# ── Linux ──────────────────────────────────────────────────────────────────
+linux:
+  target:
+    - AppImage
+    - deb
+  icon: resources/icon.png
+  category: Office
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+# ── Auto-updater (GitHub Releases) ────────────────────────────────────────
+publish:
+  provider: github
+  owner: paschek7
+  repo: dailyos
+  releaseType: release

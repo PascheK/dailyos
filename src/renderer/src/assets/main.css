@@ -1,0 +1,254 @@
+@import "tailwindcss";
+
+/* ── Valeurs par défaut (thème Blossom) ──────────────────────────────────────
+   Ces variables sont écrasées en runtime par applyTheme().
+   Tailwind v4 génère bg-slate-900 → background: var(--color-slate-900),
+   donc changer la variable suffit à re-themer tout le UI.
+── */
+@theme {
+  --color-slate-950: #0d0a12;
+  --color-slate-900: #151020;
+  --color-slate-800: #1d1628;
+  --color-slate-700: #28203a;
+  --color-slate-600: #3c2e52;
+  --color-slate-500: #8c7a90;
+  --color-slate-400: #c2b4cc;
+  --color-slate-300: #ddd4e8;
+  --color-slate-200: #d8e3f0;
+  --color-slate-100: #F8E1E1;
+  --color-slate-50:  #fdf4f4;
+
+  --color-blue-700: #455f8d;
+  --color-blue-600: #5570a0;
+  --color-blue-500: #6985B5;
+  --color-blue-400: #99B4DA;
+  --color-blue-300: #bdd0ea;
+
+  --color-cyan-600: #7a6882;
+  --color-cyan-500: #9a84a3;
+  --color-cyan-400: #C1CFE6;
+
+  --color-indigo-400: #99B4DA;
+  --color-indigo-500: #6985B5;
+}
+
+/* ── Variables runtime (set by applyTheme) ───────────────────────────────── */
+:root {
+  --color-primary:         #6985B5;
+  --accent-gradient-start: #6985B5;
+  --accent-gradient-end:   #806E83;
+  --accent-gradient:       linear-gradient(135deg, #6985B5, #806E83);
+}
+
+/* ── Utilitaires accent ───────────────────────────────────────────────────── */
+
+.bg-accent-gradient {
+  background: var(--accent-gradient);
+}
+
+.glow-accent {
+  box-shadow: 0 0 20px color-mix(in srgb, var(--color-primary) 30%, transparent);
+}
+
+/* ── Markdown preview ────────────────────────────────────────────────────── */
+
+.md-preview { height: 100%; overflow: auto; }
+
+.md-preview h1 {
+  font-size: 1.35em; font-weight: 700;
+  color: var(--color-slate-100);
+  margin: 0 0 .45em;
+}
+.md-preview h2 {
+  font-size: 1.15em; font-weight: 600;
+  color: var(--color-slate-100);
+  margin: .6em 0 .35em;
+}
+.md-preview h3 {
+  font-size: 1em; font-weight: 600;
+  color: var(--color-slate-200);
+  margin: .5em 0 .3em;
+}
+.md-preview p {
+  font-size: 13px; line-height: 1.65;
+  color: var(--color-slate-400);
+  margin: 0 0 .5em;
+}
+.md-preview ul, .md-preview ol {
+  padding-left: 1.3em; margin: 0 0 .5em;
+  color: var(--color-slate-400);
+}
+.md-preview li {
+  font-size: 13px; line-height: 1.6; margin-bottom: .15em;
+}
+.md-preview li input[type=checkbox] {
+  margin-right: .4em;
+  accent-color: var(--color-primary);
+}
+.md-preview strong { color: var(--color-slate-100); font-weight: 600; }
+.md-preview em    { color: var(--color-slate-500); font-style: italic; }
+.md-preview code  {
+  background: var(--color-slate-800);
+  padding: .1em .4em; border-radius: 4px;
+  font-size: .82em;
+  color: var(--color-blue-400);
+  font-family: monospace;
+}
+.md-preview pre {
+  background: var(--color-slate-800);
+  border: 1px solid var(--color-slate-700);
+  padding: .75em 1em; border-radius: 8px;
+  overflow-x: auto; margin: 0 0 .6em;
+}
+.md-preview pre code {
+  background: none; padding: 0;
+  color: var(--color-slate-100); font-size: 12px;
+}
+.md-preview blockquote {
+  border-left: 3px solid var(--color-primary);
+  padding-left: .8em; margin: .4em 0;
+  color: var(--color-slate-500); font-style: italic;
+}
+.md-preview a  { color: var(--color-blue-400); text-decoration: underline; }
+.md-preview hr { border: none; border-top: 1px solid var(--color-slate-700); margin: .7em 0; }
+.md-preview table {
+  border-collapse: collapse; width: 100%;
+  margin-bottom: .6em; font-size: 12px;
+}
+.md-preview th, .md-preview td {
+  border: 1px solid var(--color-slate-700);
+  padding: .3em .6em;
+  color: var(--color-slate-300);
+}
+.md-preview th {
+  background: var(--color-slate-800);
+  color: var(--color-slate-200);
+  font-weight: 600; text-align: left;
+}
+
+/* ── Scrollbar ───────────────────────────────────────────────────────────── */
+
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: var(--color-slate-700);
+  border-radius: 99px;
+}
+::-webkit-scrollbar-thumb:hover { background: var(--color-slate-600); }
+
+/* ── Champ formulaire modal IA ───────────────────────────────────────────── */
+
+.input-modal {
+  width: 100%;
+  background: var(--color-slate-800);
+  border: 1px solid var(--color-slate-700);
+  border-radius: 0.75rem;
+  padding: 0.5rem 0.875rem;
+  font-size: 0.875rem;
+  color: var(--color-slate-100);
+  outline: none;
+  transition: border-color 0.15s;
+}
+.input-modal::placeholder { color: var(--color-slate-500); }
+.input-modal:focus { border-color: var(--color-primary); }
+.input-modal[type="datetime-local"],
+.input-modal[type="date"] { color-scheme: dark; }
+
+/* ── Sélection de texte ──────────────────────────────────────────────────── */
+
+::selection {
+  background: color-mix(in srgb, var(--color-primary) 35%, transparent);
+  color: var(--color-slate-100);
+}
+
+/* ── React Grid Layout — override styles ────────────────────────────────── */
+
+.react-grid-item.react-grid-placeholder {
+  background: var(--color-primary) !important;
+  opacity: 0.12 !important;
+  border-radius: 1rem !important;
+  border: 2px dashed var(--color-primary) !important;
+}
+
+.react-resizable-handle {
+  opacity: 0;
+  transition: opacity 0.15s;
+}
+
+.react-grid-item:hover .react-resizable-handle {
+  opacity: 0.4;
+}
+
+.react-resizable-handle::after {
+  border-color: var(--color-slate-400) !important;
+}
+
+/* ── Animations ──────────────────────────────────────────────────────────── */
+
+@keyframes fade-up {
+  from { opacity: 0; transform: translateY(12px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes fade-in {
+  from { opacity: 0; }
+  to   { opacity: 1; }
+}
+
+@keyframes scale-in {
+  from { opacity: 0; transform: scale(0.94); }
+  to   { opacity: 1; transform: scale(1); }
+}
+
+@keyframes slide-in-left {
+  from { opacity: 0; transform: translateX(-12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes slide-in-right {
+  from { opacity: 0; transform: translateX(12px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@keyframes progress-indeterminate {
+  0%   { transform: translateX(-100%); width: 60%; }
+  50%  { transform: translateX(80%);  width: 60%; }
+  100% { transform: translateX(200%); width: 60%; }
+}
+
+/* Classes utilitaires */
+
+.animate-page {
+  animation: fade-up 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-scale-in {
+  animation: scale-in 0.2s cubic-bezier(0.34, 1.56, 0.64, 1) both;
+}
+
+.animate-fade-in {
+  animation: fade-in 0.18s ease-out both;
+}
+
+.animate-slide-left {
+  animation: slide-in-left 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+.animate-slide-right {
+  animation: slide-in-right 0.22s cubic-bezier(0.22, 1, 0.36, 1) both;
+}
+
+/* Délais de stagger pour les listes */
+.stagger-1 { animation-delay: 0.04s; }
+.stagger-2 { animation-delay: 0.08s; }
+.stagger-3 { animation-delay: 0.12s; }
+.stagger-4 { animation-delay: 0.16s; }
+.stagger-5 { animation-delay: 0.20s; }
+
+/* Désactiver toutes les animations si la préférence est OFF */
+.no-animations *,
+.no-animations *::before,
+.no-animations *::after {
+  animation-duration: 0.001ms !important;
+  transition-duration: 0.001ms !important;
+}
