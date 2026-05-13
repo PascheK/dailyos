@@ -5,6 +5,10 @@ on:
     tags:
       - 'v*'
 
+# Donne les droits d'écriture au GITHUB_TOKEN intégré pour créer des releases
+permissions:
+  contents: write
+
 jobs:
   # ── macOS (arm64 + x64) ──────────────────────────────────────────────────
   build-mac:
@@ -18,11 +22,11 @@ jobs:
           cache: npm
 
       - name: Install dependencies
-        run: npm ci --legacy-peer-deps --legacy-peer-deps
+        run: npm ci --legacy-peer-deps
 
       - name: Build & publish (macOS)
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build:mac -- --publish always
 
   # ── Windows (x64) ────────────────────────────────────────────────────────
@@ -41,7 +45,7 @@ jobs:
 
       - name: Build & publish (Windows)
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build:win -- --publish always
 
   # ── Linux (AppImage + deb) ───────────────────────────────────────────────
@@ -67,5 +71,5 @@ jobs:
 
       - name: Build & publish (Linux)
         env:
-          GH_TOKEN: ${{ secrets.GH_TOKEN }}
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: npm run build:linux -- --publish always
