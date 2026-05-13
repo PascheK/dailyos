@@ -73,6 +73,6 @@ linux:
 # ── Auto-updater (GitHub Releases) ────────────────────────────────────────
 publish:
   provider: github
-  owner: paschek7
+  owner: PascheK
   repo: dailyos
   releaseType: release
