@@ -82,7 +82,9 @@ function createWindow(): void {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
     mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL)
   } else {
-    mainWindow.loadFile(join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`))
+    // Le renderer est buildé dans src/renderer/.vite/renderer/<name>/ car
+    // vite.renderer.config.ts utilise root:'src/renderer' qui décale le outDir
+    mainWindow.loadFile(join(__dirname, `../../src/renderer/.vite/renderer/${MAIN_WINDOW_VITE_NAME}/index.html`))
   }
 }
 
@@ -171,7 +173,9 @@ app.whenReady().then(() => {
   // Auto-update — uniquement en production (pas en dev)
   // Vérifie les releases GitHub et installe en tâche de fond
   if (!is.dev) {
-    autoUpdater.checkForUpdatesAndNotify()
+    autoUpdater.checkForUpdatesAndNotify().catch((e) => {
+      console.error('Auto-updater error:', e)
+    })
   }
 
   app.on('activate', function () {
