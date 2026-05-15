@@ -1,6 +1,6 @@
 {
   "name": "dailyos",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Ton assistant de productivité personnel — Electron + React",
   "main": ".vite/build/index.js",
   "author": {
