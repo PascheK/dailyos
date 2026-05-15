@@ -89,10 +89,16 @@ const api = {
     }
   },
   updater: {
+    checkNow: () => ipcRenderer.invoke('updater:check'),
     onUpdateAvailable: (cb: (info: { version: string }) => void) => {
       const handler = (_: unknown, info: { version: string }): void => cb(info)
       ipcRenderer.on('update:available', handler)
       return () => ipcRenderer.removeListener('update:available', handler)
+    },
+    onUpdateNotAvailable: (cb: () => void) => {
+      const handler = (): void => cb()
+      ipcRenderer.on('update:not-available', handler)
+      return () => ipcRenderer.removeListener('update:not-available', handler)
     }
   },
   settings: {

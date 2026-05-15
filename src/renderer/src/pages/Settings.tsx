@@ -1135,6 +1135,8 @@ function DataSection(): React.JSX.Element {
   )
 }
 
+type UpdateStatus = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error'
+
 function AboutSection(): React.JSX.Element {
   const [info, setInfo] = useState<{
     version: string
@@ -1143,10 +1145,46 @@ function AboutSection(): React.JSX.Element {
     electron: string
     node: string
   } | null>(null)
+  const [autoUpdate, setAutoUpdate] = useState(
+    localStorage.getItem('dailyos:auto-update') !== 'false'
+  )
+  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [availableVersion, setAvailableVersion] = useState<string | null>(null)
 
   useEffect(() => {
     window.api.settings.appInfo().then(setInfo)
+
+    const unsubAvail = window.api.updater.onUpdateAvailable((info) => {
+      setAvailableVersion(info.version)
+      setUpdateStatus('available')
+    })
+    const unsubNot = window.api.updater.onUpdateNotAvailable(() => {
+      setUpdateStatus('up-to-date')
+    })
+    return () => { unsubAvail(); unsubNot() }
   }, [])
+
+  const handleAutoUpdateToggle = (v: boolean): void => {
+    setAutoUpdate(v)
+    localStorage.setItem('dailyos:auto-update', String(v))
+  }
+
+  const handleCheckNow = async (): Promise<void> => {
+    setUpdateStatus('checking')
+    setAvailableVersion(null)
+    const result = await window.api.updater.checkNow()
+    if (result.skipped) setUpdateStatus('idle')
+    else if (result.error) setUpdateStatus('error')
+    // 'available' ou 'up-to-date' sera mis à jour via les events IPC
+  }
+
+  const statusLabel: Record<UpdateStatus, { text: string; cls: string } | null> = {
+    idle:       null,
+    checking:   { text: 'Vérification…',            cls: 'text-slate-400' },
+    'up-to-date': { text: 'L\'app est à jour ✓',   cls: 'text-green-400' },
+    available:  { text: `Mise à jour disponible — v${availableVersion}`, cls: 'text-[var(--color-primary)]' },
+    error:      { text: 'Impossible de vérifier',   cls: 'text-red-400' },
+  }
 
   return (
     <div>
@@ -1165,48 +1203,72 @@ function AboutSection(): React.JSX.Element {
         )}
       </div>
 
+      {/* ── Mises à jour ─────────────────────────────────────── */}
+      <div className="mb-6 p-4 bg-slate-800/50 rounded-2xl border border-slate-700/50 flex flex-col gap-3">
+        <p className="text-sm font-semibold text-slate-200">Mises à jour</p>
+
+        <SettingRow label="Vérification automatique"
+          description="Vérifie les nouvelles versions au démarrage">
+          <Toggle value={autoUpdate} onChange={handleAutoUpdateToggle} />
+        </SettingRow>
+
+        <div className="flex items-center gap-3 pt-1">
+          <button
+            onClick={() => void handleCheckNow()}
+            disabled={updateStatus === 'checking'}
+            className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 border border-slate-600 rounded-xl text-sm text-slate-200 transition-colors"
+          >
+            {updateStatus === 'checking'
+              ? <Loader2 className="w-4 h-4 animate-spin" />
+              : <Download className="w-4 h-4" />}
+            Vérifier maintenant
+          </button>
+
+          {statusLabel[updateStatus] && (
+            <span className={`text-xs ${statusLabel[updateStatus]!.cls}`}>
+              {statusLabel[updateStatus]!.text}
+            </span>
+          )}
+
+          {updateStatus === 'available' && (
+            <button
+              onClick={() => void window.api.shell.openExternal('https://github.com/PascheK/dailyos/releases/latest')}
+              className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:opacity-90 rounded-xl text-white text-xs font-medium transition-all"
+            >
+              <Download className="w-3.5 h-3.5" /> Télécharger
+            </button>
+          )}
+        </div>
+      </div>
+
+      {/* ── Infos système ─────────────────────────────────────── */}
       {info && (
-        <div className="flex flex-col gap-2 mt-2">
+        <div className="flex flex-col gap-2">
           {[
             ['Version', info.version],
             ['Plateforme', info.platform],
             ['Electron', info.electron],
             ['Node.js', info.node]
           ].map(([k, v]) => (
-            <div
-              key={k}
-              className="flex items-center justify-between py-2.5 border-b border-slate-700/50 last:border-0"
-            >
+            <div key={k} className="flex items-center justify-between py-2.5 border-b border-slate-700/50 last:border-0">
               <span className="text-sm text-slate-400">{k}</span>
               <span className="text-sm text-slate-300 font-mono">{v}</span>
             </div>
           ))}
           <div className="flex items-center justify-between py-2.5">
             <span className="text-sm text-slate-400">Données</span>
-            <span className="text-xs text-slate-500 font-mono truncate max-w-xs">
-              {info.userData}
-            </span>
+            <span className="text-xs text-slate-500 font-mono truncate max-w-xs">{info.userData}</span>
           </div>
         </div>
       )}
 
       <div className="flex gap-3 mt-6">
-        <a
-          href="https://github.com"
-          target="_blank"
-          rel="noreferrer"
+        <button
+          onClick={() => void window.api.shell.openExternal('https://github.com/PascheK/dailyos')}
           className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm text-slate-300 transition-colors"
         >
           <ExternalLink className="w-4 h-4" /> GitHub
-        </a>
-        <a
-          href="https://docs.dailyos.app"
-          target="_blank"
-          rel="noreferrer"
-          className="flex-1 flex items-center justify-center gap-2 py-2.5 bg-slate-800 hover:bg-slate-700 border border-slate-700 rounded-xl text-sm text-slate-300 transition-colors"
-        >
-          <ExternalLink className="w-4 h-4" /> Docs
-        </a>
+        </button>
       </div>
     </div>
   )

@@ -127,7 +127,9 @@ declare global {
         delete: (id: number)                     => Promise<void>
       }
       updater: {
+        checkNow: () => Promise<{ ok?: boolean; error?: boolean; skipped?: boolean }>
         onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
+        onUpdateNotAvailable: (cb: () => void) => () => void
       }
       shell: {
         openExternal: (url: string) => Promise<void>

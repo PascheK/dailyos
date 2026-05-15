@@ -170,16 +170,28 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Auto-update — détecte les mises à jour et notifie le renderer via IPC
+  // Auto-update — piloté depuis le renderer via IPC
   if (!is.dev) {
     autoUpdater.on('update-available', (info) => {
       const win = BrowserWindow.getAllWindows()[0]
       if (win) win.webContents.send('update:available', { version: info.version })
     })
-    autoUpdater.checkForUpdates().catch(() => {
-      // Silencieux — app-update.yml absent sur les builds non publiés
+    autoUpdater.on('update-not-available', () => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win) win.webContents.send('update:not-available')
     })
   }
+
+  // Handler : le renderer déclenche la vérification
+  ipcMain.handle('updater:check', async () => {
+    if (is.dev) return { skipped: true }
+    try {
+      await autoUpdater.checkForUpdates()
+      return { ok: true }
+    } catch {
+      return { error: true }
+    }
+  })
 
 
   app.on('activate', function () {

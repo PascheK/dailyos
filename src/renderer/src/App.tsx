@@ -86,10 +86,18 @@ function App(): React.JSX.Element {
     setSetupDone(localStorage.getItem('dailyos:setup-done') === 'true')
 
     // Écouter les mises à jour disponibles
-    const unsub = window.api.updater.onUpdateAvailable((info) => {
+    const unsubAvailable = window.api.updater.onUpdateAvailable((info) => {
       setUpdateVersion(info.version)
     })
-    return unsub
+    const unsubNot = window.api.updater.onUpdateNotAvailable(() => { /* rien */ })
+
+    // Check automatique au démarrage si activé
+    const autoUpdate = localStorage.getItem('dailyos:auto-update') !== 'false'
+    if (autoUpdate) {
+      setTimeout(() => { void window.api.updater.checkNow() }, 3000)
+    }
+
+    return () => { unsubAvailable(); unsubNot() }
   }, [])
 
   const [sidebar, setSidebar] = useState<SidebarState>(() => {
