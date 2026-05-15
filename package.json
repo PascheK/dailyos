@@ -19,7 +19,8 @@
     "build:mac": "electron-forge make --platform darwin",
     "build:win": "electron-forge make --platform win32",
     "build:linux": "electron-forge make --platform linux",
-    "publish": "electron-forge publish"
+    "publish": "electron-forge publish",
+    "release": "bash scripts/release.sh"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.5.0",
