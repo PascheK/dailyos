@@ -63,7 +63,7 @@ const config: ForgeConfig = {
         name: 'dailyos'
       },
       prerelease: false,
-      draft: true // Draft d'abord — on le publie manuellement quand tout est prêt
+      draft: false
     })
   ]
 }
