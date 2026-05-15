@@ -4,7 +4,6 @@ import { ArrowLeft, Check, Loader2, StickyNote } from 'lucide-react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 // ExcalidrawImperativeAPI n'est pas ré-exporté depuis le package root — on l'extrait via les props
 type ExcalidrawImperativeAPI = Parameters<NonNullable<React.ComponentProps<typeof Excalidraw>['excalidrawAPI']>>[0]
-import '@excalidraw/excalidraw/index.css'
 import { ExcaliMath } from '@excalimath/core'
 import { MarkdownBlock } from '../components/notes/MarkdownBlock'
 import { useWhiteboard } from '../hooks/useWhiteboard'

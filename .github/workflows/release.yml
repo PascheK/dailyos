@@ -5,7 +5,6 @@ on:
     tags:
       - 'v*'
 
-# Donne les droits d'écriture au GITHUB_TOKEN intégré pour créer des releases
 permissions:
   contents: write
 
@@ -26,10 +25,8 @@ jobs:
 
       - name: Build & publish (macOS)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          # Force le téléchargement des binaires depuis GitHub (npmmirror n'a pas dmg-builder arm64)
-          ELECTRON_BUILDER_BINARIES_MIRROR: https://github.com/electron-userland/electron-builder-binaries/releases/download/
-        run: npm run build:mac -- --publish always
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run publish -- --platform darwin
 
   # ── Windows (x64) ────────────────────────────────────────────────────────
   build-win:
@@ -47,10 +44,10 @@ jobs:
 
       - name: Build & publish (Windows)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build:win -- --publish always
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run publish -- --platform win32
 
-  # ── Linux (AppImage + deb) ───────────────────────────────────────────────
+  # ── Linux (deb) ──────────────────────────────────────────────────────────
   build-linux:
     runs-on: ubuntu-latest
     steps:
@@ -66,12 +63,12 @@ jobs:
           sudo apt-get update
           sudo apt-get install -y libnss3-dev libatk-bridge2.0-dev libdrm-dev \
             libxkbcommon-dev libgbm-dev libasound2-dev libxss1 libgtk-3-dev \
-            libxshmfence-dev
+            libxshmfence-dev rpm
 
       - name: Install dependencies
         run: npm ci --legacy-peer-deps
 
       - name: Build & publish (Linux)
         env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-        run: npm run build:linux -- --publish always
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: npm run publish -- --platform linux
