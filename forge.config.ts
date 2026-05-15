@@ -13,6 +13,7 @@ const config: ForgeConfig = {
     },
     appBundleId: 'com.killian.dailyos',
     name: 'DailyOS',
+    executableName: 'dailyos',
     icon: 'resources/icon',
     appCategoryType: 'public.app-category.productivity',
     darwinDarkModeSupport: true
