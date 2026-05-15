@@ -3,7 +3,10 @@ import { useParams, useNavigate } from 'react-router-dom'
 import { ArrowLeft, Check, Loader2, StickyNote } from 'lucide-react'
 import { Excalidraw } from '@excalidraw/excalidraw'
 // ExcalidrawImperativeAPI n'est pas ré-exporté depuis le package root — on l'extrait via les props
-type ExcalidrawImperativeAPI = Parameters<NonNullable<React.ComponentProps<typeof Excalidraw>['excalidrawAPI']>>[0]
+type ExcalidrawImperativeAPI = Parameters<
+  NonNullable<React.ComponentProps<typeof Excalidraw>['excalidrawAPI']>
+>[0]
+import '@excalidraw/excalidraw/index.css'
 import { ExcaliMath } from '@excalimath/core'
 import { MarkdownBlock } from '../components/notes/MarkdownBlock'
 import { useWhiteboard } from '../hooks/useWhiteboard'
@@ -26,12 +29,12 @@ export function WhiteboardEditor(): React.JSX.Element {
   const navigate = useNavigate()
   const { getBoard, saveBoard } = useWhiteboard()
 
-  const [board, setBoard]       = useState<AppBoardFull | null>(null)
+  const [board, setBoard] = useState<AppBoardFull | null>(null)
   const [saveStatus, setSaveStatus] = useState<SaveStatus>('saved')
 
   const debounceTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const boardRef      = useRef<AppBoardFull | null>(null)
-  const lastJSONRef   = useRef<string | null>(null)
+  const boardRef = useRef<AppBoardFull | null>(null)
+  const lastJSONRef = useRef<string | null>(null)
   const excalidrawRef = useRef<ExcalidrawImperativeAPI | null>(null)
 
   useEffect(() => {
@@ -43,49 +46,46 @@ export function WhiteboardEditor(): React.JSX.Element {
   }, [id, getBoard])
 
   useEffect(() => {
-    return () => { if (debounceTimer.current) clearTimeout(debounceTimer.current) }
+    return () => {
+      if (debounceTimer.current) clearTimeout(debounceTimer.current)
+    }
   }, [])
 
   // ── Sauvegarde debouncée du canvas (layout + éléments) ─────────────────────
-  const handleChange = useCallback((elements: readonly unknown[]) => {
-    const json = JSON.stringify(elements)
-    if (json === lastJSONRef.current) return
-    lastJSONRef.current = json
+  const handleChange = useCallback(
+    (elements: readonly unknown[]) => {
+      const json = JSON.stringify(elements)
+      if (json === lastJSONRef.current) return
+      lastJSONRef.current = json
 
-    const b = boardRef.current
-    if (!b) return
+      const b = boardRef.current
+      if (!b) return
 
-    setSaveStatus('unsaved')
-    if (debounceTimer.current) clearTimeout(debounceTimer.current)
-    debounceTimer.current = setTimeout(async () => {
-      setSaveStatus('saving')
-      await saveBoard(b.id, JSON.stringify({ elements }))
-      setSaveStatus('saved')
-    }, DEBOUNCE_DELAY)
-  }, [saveBoard])
+      setSaveStatus('unsaved')
+      if (debounceTimer.current) clearTimeout(debounceTimer.current)
+      debounceTimer.current = setTimeout(async () => {
+        setSaveStatus('saving')
+        await saveBoard(b.id, JSON.stringify({ elements }))
+        setSaveStatus('saved')
+      }, DEBOUNCE_DELAY)
+    },
+    [saveBoard]
+  )
 
   // ── Rendu des blocs embarqués ───────────────────────────────────────────────
   // Excalidraw appelle cette fonction pour chaque élément "embeddable".
   // Si l'élément a customData.type === 'markdown', on rend <MarkdownBlock>.
   // Le contenu est stocké dans le fichier .md (lu/écrit par MarkdownBlock via IPC).
-  const renderEmbeddable = useCallback(
-    (...[element, appState]: RenderEmbeddableArgs) => {
-      const data = element.customData as MarkdownCustomData | undefined
-      if (data?.type !== 'markdown' || !data.fileId) return null
+  const renderEmbeddable = useCallback((...[element, appState]: RenderEmbeddableArgs) => {
+    const data = element.customData as MarkdownCustomData | undefined
+    if (data?.type !== 'markdown' || !data.fileId) return null
 
-      const isEditing =
-        (appState as { activeEmbeddable?: { element: { id: string } } })
-          .activeEmbeddable?.element.id === element.id
+    const isEditing =
+      (appState as { activeEmbeddable?: { element: { id: string } } }).activeEmbeddable?.element
+        .id === element.id
 
-      return (
-        <MarkdownBlock
-          fileId={data.fileId}
-          isEditing={isEditing}
-        />
-      )
-    },
-    []
-  )
+    return <MarkdownBlock fileId={data.fileId} isEditing={isEditing} />
+  }, [])
 
   // ── Création d'un bloc markdown ────────────────────────────────────────────
   // 1. Crée un vrai fichier .md sur le disque (visible dans l'onglet Fichiers)
@@ -99,46 +99,47 @@ export function WhiteboardEditor(): React.JSX.Element {
     const file = await window.api.files.createNote('note')
 
     const appState = api.getAppState()
-    const cx = (-appState.scrollX + appState.width  / 2) / appState.zoom.value
+    const cx = (-appState.scrollX + appState.width / 2) / appState.zoom.value
     const cy = (-appState.scrollY + appState.height / 2) / appState.zoom.value
-    const W = 380, H = 260
+    const W = 380,
+      H = 260
 
     api.updateScene({
       elements: [
         ...api.getSceneElements(),
         {
-          type:            'embeddable' as const,
-          id:              crypto.randomUUID(),
-          x:               cx - W / 2,
-          y:               cy - H / 2,
-          width:           W,
-          height:          H,
-          angle:           0,
-          strokeColor:     '#6d5fff',
+          type: 'embeddable' as const,
+          id: crypto.randomUUID(),
+          x: cx - W / 2,
+          y: cy - H / 2,
+          width: W,
+          height: H,
+          angle: 0,
+          strokeColor: '#6d5fff',
           backgroundColor: 'transparent',
-          fillStyle:       'solid'  as const,
-          strokeWidth:     1,
-          strokeStyle:     'solid'  as const,
-          roughness:       0,
-          opacity:         100,
-          groupIds:        [] as string[],
-          frameId:         null,
-          roundness:       null,
-          seed:            Math.floor(Math.random() * 2 ** 31),
-          version:         1,
-          versionNonce:    Math.floor(Math.random() * 2 ** 31),
-          isDeleted:       false as const,
-          boundElements:   null,
-          updated:         Date.now(),
+          fillStyle: 'solid' as const,
+          strokeWidth: 1,
+          strokeStyle: 'solid' as const,
+          roughness: 0,
+          opacity: 100,
+          groupIds: [] as string[],
+          frameId: null,
+          roundness: null,
+          seed: Math.floor(Math.random() * 2 ** 31),
+          version: 1,
+          versionNonce: Math.floor(Math.random() * 2 ** 31),
+          isDeleted: false as const,
+          boundElements: null,
+          updated: Date.now(),
           // URI custom — validateEmbeddable l'accepte, renderEmbeddable le gère
-          link:            `dailyos://md/${file.id}`,
-          locked:          false,
+          link: `dailyos://md/${file.id}`,
+          locked: false,
           // Le contenu est dans le fichier, pas ici — on stocke seulement l'ID
-          customData:      { type: 'markdown', fileId: file.id } satisfies MarkdownCustomData,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        } as any,
+          customData: { type: 'markdown', fileId: file.id } satisfies MarkdownCustomData
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        } as any
       ],
-      captureUpdate: 'IMMEDIATELY',
+      captureUpdate: 'IMMEDIATELY'
     })
   }, [])
 
@@ -152,8 +153,11 @@ export function WhiteboardEditor(): React.JSX.Element {
   }
 
   const initialElements = (() => {
-    try { return JSON.parse(board.data).elements ?? [] }
-    catch { return [] }
+    try {
+      return JSON.parse(board.data).elements ?? []
+    } catch {
+      return []
+    }
   })()
 
   return (
@@ -174,7 +178,9 @@ export function WhiteboardEditor(): React.JSX.Element {
 
         {/* Bouton insertion bloc MD */}
         <button
-          onClick={() => { void addMarkdownBlock() }}
+          onClick={() => {
+            void addMarkdownBlock()
+          }}
           title="Insérer un bloc Note (Markdown)"
           className="ml-auto flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-300 hover:text-white text-xs font-medium transition-colors shrink-0"
         >
@@ -185,10 +191,16 @@ export function WhiteboardEditor(): React.JSX.Element {
         {/* Statut de sauvegarde */}
         <div className="flex items-center gap-1.5 text-xs shrink-0">
           {saveStatus === 'saving' && (
-            <><Loader2 className="w-3 h-3 text-slate-500 animate-spin" /><span className="text-slate-500">Sauvegarde...</span></>
+            <>
+              <Loader2 className="w-3 h-3 text-slate-500 animate-spin" />
+              <span className="text-slate-500">Sauvegarde...</span>
+            </>
           )}
           {saveStatus === 'saved' && (
-            <><Check className="w-3 h-3 text-green-500" /><span className="text-slate-500">Sauvegardé</span></>
+            <>
+              <Check className="w-3 h-3 text-green-500" />
+              <span className="text-slate-500">Sauvegardé</span>
+            </>
           )}
           {saveStatus === 'unsaved' && <span className="text-slate-600">Non sauvegardé</span>}
         </div>
@@ -197,7 +209,9 @@ export function WhiteboardEditor(): React.JSX.Element {
       {/* Canvas */}
       <div className="flex-1 relative">
         <Excalidraw
-          excalidrawAPI={(api) => { excalidrawRef.current = api }}
+          excalidrawAPI={(api) => {
+            excalidrawRef.current = api
+          }}
           initialData={{ elements: initialElements }}
           onChange={(elements) => handleChange(elements as readonly unknown[])}
           renderEmbeddable={renderEmbeddable}

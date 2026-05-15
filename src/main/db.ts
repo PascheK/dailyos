@@ -205,4 +205,128 @@ if (version < 5) {
   console.log('[DB] Migration v5 terminée.')
 }
 
+if (version < 6) {
+  // Migration v5 → v6 : gestionnaire de budget
+  console.log('[DB] Migration v6 : tables budget...')
+  db.transaction(() => {
+    db.exec(`
+      -- Budgets principaux
+      CREATE TABLE IF NOT EXISTS budgets (
+        id                      INTEGER PRIMARY KEY AUTOINCREMENT,
+        name                    TEXT NOT NULL,
+        total_amount            REAL NOT NULL,
+        currency                TEXT NOT NULL DEFAULT 'CHF',
+        display_currency        TEXT,
+        display_rate            REAL,
+        display_rate_updated_at TEXT,
+        start_date              TEXT NOT NULL,
+        end_date                TEXT NOT NULL,
+        created_at              TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Dépenses hors-budget (non comptées mensuellement)
+      CREATE TABLE IF NOT EXISTS budget_extra_items (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id    INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+        label        TEXT NOT NULL,
+        amount       REAL NOT NULL,
+        planned_date TEXT,
+        created_at   TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Catégories (budget_id NULL = catégorie globale prédéfinie)
+      CREATE TABLE IF NOT EXISTS budget_categories (
+        id        INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id INTEGER REFERENCES budgets(id) ON DELETE CASCADE,
+        name      TEXT NOT NULL,
+        color     TEXT NOT NULL DEFAULT '#6985B5',
+        icon      TEXT NOT NULL DEFAULT '💳'
+      );
+
+      -- Transactions (dépenses & revenus)
+      CREATE TABLE IF NOT EXISTS budget_transactions (
+        id           INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id    INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+        category_id  INTEGER REFERENCES budget_categories(id) ON DELETE SET NULL,
+        label        TEXT NOT NULL,
+        amount       REAL NOT NULL,
+        currency     TEXT NOT NULL,
+        amount_base  REAL NOT NULL,
+        date         TEXT NOT NULL,
+        is_revenue   INTEGER NOT NULL DEFAULT 0,
+        is_recurring INTEGER NOT NULL DEFAULT 0,
+        recurring_id INTEGER REFERENCES budget_recurring(id) ON DELETE SET NULL,
+        created_at   TEXT DEFAULT (datetime('now'))
+      );
+
+      -- Modèles de transactions récurrentes
+      CREATE TABLE IF NOT EXISTS budget_recurring (
+        id               INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id        INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+        category_id      INTEGER REFERENCES budget_categories(id) ON DELETE SET NULL,
+        label            TEXT NOT NULL,
+        amount           REAL NOT NULL,
+        currency         TEXT NOT NULL,
+        recurrence_type  TEXT NOT NULL DEFAULT 'monthly',
+        recurrence_day   INTEGER NOT NULL DEFAULT 1,
+        active           INTEGER NOT NULL DEFAULT 1,
+        last_applied     TEXT
+      );
+
+      -- Objectifs IA par période
+      CREATE TABLE IF NOT EXISTS budget_ai_goals (
+        id                  INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id           INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+        period_start        TEXT NOT NULL,
+        period_end          TEXT NOT NULL,
+        monthly_target      REAL NOT NULL,
+        critical_threshold  REAL NOT NULL,
+        recalculated_at     TEXT DEFAULT (datetime('now'))
+      );
+    `)
+
+    // Catégories globales prédéfinies
+    const existingCats = db.prepare(
+      'SELECT COUNT(*) as c FROM budget_categories WHERE budget_id IS NULL'
+    ).get() as { c: number }
+
+    if (existingCats.c === 0) {
+      const cats = [
+        { name: 'Logement',     color: '#6985B5', icon: '🏠' },
+        { name: 'Nourriture',   color: '#22a84e', icon: '🍜' },
+        { name: 'Transport',    color: '#f59e0b', icon: '🚆' },
+        { name: 'Loisirs',      color: '#a855f7', icon: '🎮' },
+        { name: 'Santé',        color: '#ef4444', icon: '💊' },
+        { name: 'Shopping',     color: '#ec4899', icon: '🛍️' },
+        { name: 'Voyages',      color: '#0891b2', icon: '✈️' },
+        { name: 'Abonnements',  color: '#64748b', icon: '📱' },
+        { name: 'Autre',        color: '#78716c', icon: '💳' },
+      ]
+      const ins = db.prepare(
+        'INSERT INTO budget_categories (budget_id, name, color, icon) VALUES (NULL, ?, ?, ?)'
+      )
+      for (const c of cats) ins.run(c.name, c.color, c.icon)
+    }
+
+    db.pragma('user_version = 6')
+  })()
+  console.log('[DB] Migration v6 terminée.')
+}
+
+if (version < 7) {
+  // Migration v6 → v7 : limites de budget par catégorie
+  console.log('[DB] Migration v7 : table budget_category_limits...')
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS budget_category_limits (
+      id            INTEGER PRIMARY KEY AUTOINCREMENT,
+      budget_id     INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+      category_id   INTEGER NOT NULL REFERENCES budget_categories(id) ON DELETE CASCADE,
+      monthly_limit REAL NOT NULL,
+      UNIQUE(budget_id, category_id)
+    );
+  `)
+  db.pragma('user_version = 7')
+  console.log('[DB] Migration v7 terminée.')
+}
+
 console.log('[DB] Initialisée :', DB_PATH)

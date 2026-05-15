@@ -19,7 +19,8 @@ import {
   Trash2,
   ExternalLink,
   Shield,
-  AlertCircle
+  AlertCircle,
+  Wallet
 } from 'lucide-react'
 import {
   COLOR_THEMES,
@@ -37,6 +38,7 @@ type Section =
   | 'calendar'
   | 'files'
   | 'ai'
+  | 'budget'
   | 'sync'
   | 'data'
   | 'about'
@@ -1018,6 +1020,46 @@ function AISection({ settings, onPatch }: SectionProps): React.JSX.Element {
   )
 }
 
+const BUDGET_CURRENCIES = [
+  { code: 'CHF', label: 'CHF — Franc suisse' },
+  { code: 'EUR', label: 'EUR — Euro' },
+  { code: 'USD', label: 'USD — Dollar US' },
+  { code: 'JPY', label: 'JPY — Yen japonais' },
+  { code: 'GBP', label: 'GBP — Livre sterling' },
+  { code: 'CAD', label: 'CAD — Dollar canadien' },
+  { code: 'AUD', label: 'AUD — Dollar australien' },
+  { code: 'KRW', label: 'KRW — Won coréen' },
+  { code: 'CNY', label: 'CNY — Yuan chinois' },
+  { code: 'THB', label: 'THB — Baht thaïlandais' },
+]
+
+function BudgetSection({ settings, onPatch }: SectionProps): React.JSX.Element {
+  return (
+    <div>
+      <SectionTitle title="Budget" subtitle="Préférences du gestionnaire de budget." />
+
+      <SettingRow
+        label="Devise par défaut"
+        description="Pré-sélectionnée lors de la création d'un nouveau budget."
+      >
+        <Select
+          value={settings.budget?.defaultCurrency ?? 'CHF'}
+          onChange={(v) => onPatch({ budget: { defaultCurrency: v } })}
+          options={BUDGET_CURRENCIES.map(c => ({ value: c.code, label: c.code }))}
+        />
+      </SettingRow>
+
+      <div className="mt-6 p-4 bg-slate-800/50 border border-slate-700/50 rounded-xl flex flex-col gap-2">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">Taux de change</p>
+        <p className="text-xs text-slate-500 leading-relaxed">
+          Les taux de change sont récupérés depuis <strong className="text-slate-400">frankfurter.app</strong> (gratuit, sans clé API).
+          Actualise le taux depuis la page de détail d'un budget avec l'icône <span className="text-slate-300">⟳</span>.
+        </p>
+      </div>
+    </div>
+  )
+}
+
 function SyncSection(): React.JSX.Element {
   return (
     <div>
@@ -1288,6 +1330,7 @@ const NAV: { id: Section; label: string; icon: React.ElementType }[] = [
   { id: 'calendar', label: 'Calendrier', icon: Calendar },
   { id: 'files', label: 'Fichiers', icon: FolderOpen },
   { id: 'ai', label: 'IA & API', icon: Bot },
+  { id: 'budget', label: 'Budget', icon: Wallet },
   { id: 'sync', label: 'Synchronisation', icon: Cloud },
   { id: 'data', label: 'Données', icon: Database },
   { id: 'about', label: 'À propos', icon: Info }
@@ -1323,6 +1366,7 @@ export function Settings(): React.JSX.Element {
     calendar: <CalendarSection {...sectionProps} />,
     files: <FilesSection {...sectionProps} />,
     ai: <AISection {...sectionProps} />,
+    budget: <BudgetSection {...sectionProps} />,
     sync: <SyncSection />,
     data: <DataSection />,
     about: <AboutSection />

@@ -101,6 +101,47 @@ const api = {
       return () => ipcRenderer.removeListener('update:not-available', handler)
     }
   },
+  budget: {
+    list:            ()                             => ipcRenderer.invoke('budget:list'),
+    create:          (p: object)                    => ipcRenderer.invoke('budget:create', p),
+    update:          (p: object)                    => ipcRenderer.invoke('budget:update', p),
+    delete:          (id: number)                   => ipcRenderer.invoke('budget:delete', id),
+    summary:         (id: number)                   => ipcRenderer.invoke('budget:summary', id),
+    widgetData:      ()                             => ipcRenderer.invoke('budget:widgetData'),
+    addTransaction:  (p: object)                    => ipcRenderer.invoke('budget:transactions:add', p),
+    listTransactions:(id: number)                   => ipcRenderer.invoke('budget:transactions:list', id),
+    deleteTransaction:(id: number)                  => ipcRenderer.invoke('budget:transactions:delete', id),
+    addExtra:        (p: object)                    => ipcRenderer.invoke('budget:extras:add', p),
+    listExtras:      (id: number)                   => ipcRenderer.invoke('budget:extras:list', id),
+    deleteExtra:     (id: number)                   => ipcRenderer.invoke('budget:extras:delete', id),
+    listCategories:  (budgetId?: number)            => ipcRenderer.invoke('budget:categories:list', budgetId),
+    createCategory:  (p: object)                    => ipcRenderer.invoke('budget:categories:create', p),
+    deleteCategory:  (id: number)                   => ipcRenderer.invoke('budget:categories:delete', id),
+    listRecurring:   (id: number)                   => ipcRenderer.invoke('budget:recurring:list', id),
+    createRecurring: (p: object)                    => ipcRenderer.invoke('budget:recurring:create', p),
+    toggleRecurring: (id: number)                   => ipcRenderer.invoke('budget:recurring:toggle', id),
+    deleteRecurring: (id: number)                   => ipcRenderer.invoke('budget:recurring:delete', id),
+    applyRecurring:  (id: number)                   => ipcRenderer.invoke('budget:recurring:apply', id),
+    getGoal:         (id: number)                   => ipcRenderer.invoke('budget:goals:get', id),
+    recalculateGoal: (id: number)                   => ipcRenderer.invoke('budget:goals:recalculate', id),
+    aiAnalysis:      (id: number)                   => ipcRenderer.invoke('budget:goals:aiAnalysis', id),
+    refreshRate:     (id: number)                   => ipcRenderer.invoke('budget:rate:refresh', id),
+    listCategoryLimits: (budgetId: number)          => ipcRenderer.invoke('budget:categoryLimits:list', budgetId),
+    setCategoryLimit:   (p: object)                 => ipcRenderer.invoke('budget:categoryLimits:set', p),
+    deleteCategoryLimit:(p: object)                 => ipcRenderer.invoke('budget:categoryLimits:delete', p),
+    categorySpending:   (budgetId: number)          => ipcRenderer.invoke('budget:categorySpending', budgetId),
+    wizardStart:        (p: object)                 => ipcRenderer.invoke('budget:wizard:start', p),
+    onWizardChunk: (cb: (chunk: string) => void) => {
+      const h = (_: unknown, chunk: string): void => cb(chunk)
+      ipcRenderer.on('budget:wizard:chunk', h)
+      return () => ipcRenderer.removeListener('budget:wizard:chunk', h)
+    },
+    onWizardDone: (cb: (data: { budgetId: number }) => void) => {
+      const h = (_: unknown, data: { budgetId: number }): void => cb(data)
+      ipcRenderer.on('budget:wizard:done', h)
+      return () => ipcRenderer.removeListener('budget:wizard:done', h)
+    },
+  },
   settings: {
     get:          ()                                          => ipcRenderer.invoke('settings:get'),
     patch:        (patch: object)                             => ipcRenderer.invoke('settings:patch', patch),

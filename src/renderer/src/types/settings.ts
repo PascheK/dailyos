@@ -221,6 +221,9 @@ export type AppSettings = {
     startPage: 'home' | 'files' | 'notes' | 'calendar'
     sidebarDefault: 'expanded' | 'collapsed'
   }
+  budget: {
+    defaultCurrency: string
+  }
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -229,5 +232,6 @@ export const DEFAULT_SETTINGS: AppSettings = {
   calendar: { firstDayOfWeek: 1, defaultView: 'month', timeFormat: '24h', showWeekNumbers: false },
   files: { defaultSort: 'date', defaultView: 'grid' },
   ai: { provider: 'openai', model: 'gpt-4o-mini', temperature: 0.7 },
-  app: { language: 'fr', startPage: 'home', sidebarDefault: 'expanded' }
+  app: { language: 'fr', startPage: 'home', sidebarDefault: 'expanded' },
+  budget: { defaultCurrency: 'CHF' }
 }

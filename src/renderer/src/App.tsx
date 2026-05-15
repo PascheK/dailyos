@@ -10,6 +10,8 @@ import { WhiteboardList } from './pages/WhiteboardList'
 import { WhiteboardEditor } from './pages/WhiteboardEditor'
 import { Calendar } from './pages/Calendar'
 import { Settings } from './pages/Settings'
+import { Budget } from './pages/Budget'
+import { BudgetDetail } from './pages/BudgetDetail'
 import Sidebar from '@renderer/components/Sidebar'
 import { AiStreamProvider } from './context/AiStreamContext'
 import { SetupWizard } from './components/SetupWizard'
@@ -65,6 +67,8 @@ function AnimatedRoutes({ sidebar, onSidebarChange }: {
           <Route path="/ai"         element={<AI />} />
           <Route path="/calendar"   element={<Calendar />} />
           <Route path="/settings"   element={<Settings />} />
+          <Route path="/budget"     element={<Budget />} />
+          <Route path="/budget/:id" element={<BudgetDetail />} />
         </Routes>
       </div>
     </main>

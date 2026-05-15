@@ -8,12 +8,14 @@ import 'react-resizable/css/styles.css'
 import {
   Calendar, FileText, ArrowRight, Clock,
   CalendarX, FolderOpen, Sparkles, GripHorizontal,
-  CalendarDays, Zap, StickyNote, Send, X, Settings2, RotateCcw
+  CalendarDays, Zap, StickyNote, Send, X, Settings2, RotateCcw,
+  Wallet, TrendingDown, AlertTriangle
 } from 'lucide-react'
 
 type LayoutItem = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number }
 import type { CalendarEvent } from '../types/calendar'
 import type { AppFile } from '../types/files'
+import type { BudgetWidgetData } from '../types/budget'
 
 // ── Constantes & types ────────────────────────────────────────────────────────
 
@@ -23,7 +25,7 @@ const DAYS   = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi
 const STORAGE_KEY         = 'dailyos:home-layout-v4'
 const STORAGE_KEY_VISIBLE = 'dailyos:home-visible-v1'
 
-type WidgetId = 'clock' | 'events' | 'files' | 'quicknote' | 'aishortcuts'
+type WidgetId = 'clock' | 'events' | 'files' | 'quicknote' | 'aishortcuts' | 'budget'
 
 const WIDGET_META: Record<WidgetId, { label: string; icon: React.ElementType }> = {
   clock:       { label: 'Horloge',          icon: Clock },
@@ -31,9 +33,10 @@ const WIDGET_META: Record<WidgetId, { label: string; icon: React.ElementType }> 
   files:       { label: 'Fichiers récents', icon: FolderOpen },
   quicknote:   { label: 'Note rapide',      icon: StickyNote },
   aishortcuts: { label: 'Raccourcis IA',    icon: Sparkles },
+  budget:      { label: 'Budget',           icon: Wallet },
 }
 
-const ALL_WIDGET_IDS: WidgetId[] = ['clock', 'events', 'files', 'quicknote', 'aishortcuts']
+const ALL_WIDGET_IDS: WidgetId[] = ['clock', 'events', 'files', 'quicknote', 'aishortcuts', 'budget']
 
 // Layout compact — tout tient sans scroll sur ~900px de hauteur
 const DEFAULT_LAYOUT: LayoutItem[] = [
@@ -41,7 +44,8 @@ const DEFAULT_LAYOUT: LayoutItem[] = [
   { i: 'events',      x: 3,  y: 0, w: 4, h: 5, minW: 3, minH: 3 },
   { i: 'files',       x: 7,  y: 0, w: 4, h: 5, minW: 3, minH: 3 },
   { i: 'quicknote',   x: 11, y: 0, w: 3, h: 5, minW: 2, minH: 3 },
-  { i: 'aishortcuts', x: 0,  y: 5, w: 14, h: 3, minW: 4, minH: 2 },
+  { i: 'aishortcuts', x: 0,  y: 5, w: 10, h: 3, minW: 4, minH: 2 },
+  { i: 'budget',      x: 10, y: 5, w: 4,  h: 3, minW: 3, minH: 2 },
 ]
 // 8 rangées × 32px + 7 × 8px + 24px padding = ~336px
 
@@ -304,6 +308,80 @@ function AiShortcutsWidget({ navigate }: { navigate: (p: string) => void }): Rea
   )
 }
 
+// ── Widget Budget ─────────────────────────────────────────────────────────────
+
+function BudgetWidget({
+  data, navigate
+}: {
+  data: BudgetWidgetData | null; navigate: (p: string) => void
+}): React.JSX.Element {
+  if (!data) {
+    return (
+      <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-700">
+        <Wallet className="w-7 h-7" />
+        <p className="text-xs">Aucun budget actif</p>
+        <button
+          onClick={() => navigate('/budget')}
+          className="text-[10px] text-[var(--color-primary)] hover:underline">
+          Créer un budget →
+        </button>
+      </div>
+    )
+  }
+
+  const sym = (c: string): string => ({ CHF:'CHF', EUR:'€', USD:'$', JPY:'¥', GBP:'£', KRW:'₩', CNY:'¥', THB:'฿' }[c] ?? c)
+  const fmtAmt = (v: number, c: string): string =>
+    `${sym(c)} ${v.toLocaleString('fr-CH', { maximumFractionDigits: 0 })}`
+
+  const p = data.period_goal > 0 ? Math.min(100, Math.round((data.period_spent / data.period_goal) * 100)) : 0
+  const isWarn   = data.period_spent >= data.critical_threshold && data.period_spent < data.period_goal
+  const isDanger = data.period_spent >= data.period_goal
+  const barColor = isDanger ? 'bg-red-500' : isWarn ? 'bg-amber-500' : 'bg-[var(--color-primary)]'
+
+  return (
+    <div className="flex flex-col justify-between h-full gap-2">
+      <div>
+        <div className="flex items-center justify-between mb-1">
+          <p className="text-xs font-medium text-slate-300 truncate">{data.budget_name}</p>
+          {(isWarn || isDanger) && (
+            <AlertTriangle className={`w-3 h-3 shrink-0 ${isDanger ? 'text-red-400' : 'text-amber-400'}`} />
+          )}
+        </div>
+        {/* Solde restant */}
+        <p className="text-xl font-bold text-white leading-tight">
+          {fmtAmt(data.total_remaining, data.currency)}
+        </p>
+        {data.display_currency && data.display_rate && (
+          <p className="text-[10px] text-slate-600">
+            ≈ {fmtAmt(data.display_remaining ?? data.total_remaining * data.display_rate, data.display_currency)}
+          </p>
+        )}
+      </div>
+
+      {/* Barre mensuelle */}
+      <div className="flex flex-col gap-1">
+        <div className="flex items-center justify-between text-[10px] text-slate-600">
+          <span className="flex items-center gap-0.5"><TrendingDown className="w-2.5 h-2.5" /> Ce mois</span>
+          <span>{p}%</span>
+        </div>
+        <div className="h-1.5 bg-slate-800 rounded-full overflow-hidden">
+          <div className={`h-full rounded-full transition-all ${barColor}`} style={{ width: `${p}%` }} />
+        </div>
+        <div className="flex items-center justify-between text-[10px] text-slate-600">
+          <span>{fmtAmt(data.period_spent, data.currency)}</span>
+          <span>/ {fmtAmt(data.period_goal, data.currency)}</span>
+        </div>
+      </div>
+
+      <button
+        onClick={() => navigate(`/budget/${data.budget_id}`)}
+        className="flex items-center justify-center gap-1 text-[10px] text-slate-600 hover:text-[var(--color-primary)] transition-colors">
+        Voir le détail <ArrowRight className="w-2.5 h-2.5" />
+      </button>
+    </div>
+  )
+}
+
 // ── Panneau de personnalisation ───────────────────────────────────────────────
 
 function CustomizePanel({
@@ -367,6 +445,7 @@ export function Home(): React.JSX.Element {
   const [events,  setEvents]    = useState<CalendarEvent[]>([])
   const [files,   setFiles]     = useState<AppFile[]>([])
   const [userName, setUserName] = useState('')
+  const [budgetData, setBudgetData] = useState<BudgetWidgetData | null>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [showCustomize, setShowCustomize] = useState(false)
 
@@ -417,10 +496,12 @@ export function Home(): React.JSX.Element {
       window.api.calendar.list({ from: today, to: today }),
       window.api.files.list(),
       window.api.settings.get(),
-    ]).then(([evs, fls, settings]) => {
+      window.api.budget.widgetData(),
+    ]).then(([evs, fls, settings, budgetWidget]) => {
       setEvents((evs as CalendarEvent[]).sort((a, b) => new Date(a.start_at).getTime() - new Date(b.start_at).getTime()))
       setFiles((fls as AppFile[]).slice(0, 8))
       setUserName(settings.profile.name || '')
+      setBudgetData(budgetWidget)
       setLoading(false)
     })
   }, [])
@@ -487,6 +568,12 @@ export function Home(): React.JSX.Element {
       <Widget title="Raccourcis IA" icon={Sparkles} action={{ label: 'Assistant', to: '/ai' }}
         onAction={() => navigate('/ai')} dragging={isDragging}>
         <AiShortcutsWidget navigate={navigate} />
+      </Widget>
+    ),
+    budget: (
+      <Widget title="Budget" icon={Wallet} action={{ label: 'Budgets', to: '/budget' }}
+        onAction={() => navigate('/budget')} dragging={isDragging}>
+        <BudgetWidget data={budgetData} navigate={navigate} />
       </Widget>
     ),
   }

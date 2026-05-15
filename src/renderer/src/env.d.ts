@@ -4,6 +4,13 @@ import type { AppFile, AppFolder } from './types/files'
 import type { AppSettings } from './types/settings'
 import type { CalendarEvent, NewCalendarEvent } from './types/calendar'
 import type { AppBoard, AppBoardFull } from './types/whiteboard'
+import type {
+  AppBudget, BudgetSummary, BudgetWidgetData, BudgetTransaction,
+  BudgetExtraItem, BudgetCategory, BudgetRecurring, BudgetGoal,
+  BudgetCategoryLimit, CategorySpendingResult,
+  CreateBudgetPayload, NewTransactionPayload, NewExtraPayload,
+  NewCategoryPayload, NewRecurringPayload
+} from './types/budget'
 
 declare global {
   // ── Types IA (globaux car utilisés dans les pages renderer) ────────────────
@@ -125,6 +132,39 @@ declare global {
         save:   (id: number, data: string)       => Promise<void>
         rename: (id: number, title: string)      => Promise<void>
         delete: (id: number)                     => Promise<void>
+      }
+      budget: {
+        list:             ()                                       => Promise<AppBudget[]>
+        create:           (p: CreateBudgetPayload)                 => Promise<AppBudget>
+        update:           (p: Partial<CreateBudgetPayload> & { id: number }) => Promise<AppBudget>
+        delete:           (id: number)                             => Promise<boolean>
+        summary:          (id: number)                             => Promise<BudgetSummary>
+        widgetData:       ()                                       => Promise<BudgetWidgetData | null>
+        addTransaction:   (p: NewTransactionPayload)               => Promise<BudgetTransaction>
+        listTransactions: (id: number)                             => Promise<BudgetTransaction[]>
+        deleteTransaction:(id: number)                             => Promise<boolean>
+        addExtra:         (p: NewExtraPayload)                     => Promise<BudgetExtraItem>
+        listExtras:       (id: number)                             => Promise<BudgetExtraItem[]>
+        deleteExtra:      (id: number)                             => Promise<boolean>
+        listCategories:   (budgetId?: number)                      => Promise<BudgetCategory[]>
+        createCategory:   (p: NewCategoryPayload)                  => Promise<BudgetCategory>
+        deleteCategory:   (id: number)                             => Promise<boolean>
+        listRecurring:    (id: number)                             => Promise<BudgetRecurring[]>
+        createRecurring:  (p: NewRecurringPayload)                 => Promise<BudgetRecurring>
+        toggleRecurring:  (id: number)                             => Promise<boolean>
+        deleteRecurring:  (id: number)                             => Promise<boolean>
+        applyRecurring:   (id: number)                             => Promise<number>
+        getGoal:          (id: number)                             => Promise<BudgetGoal | null>
+        recalculateGoal:  (id: number)                             => Promise<BudgetGoal>
+        aiAnalysis:         (id: number)                             => Promise<string>
+        refreshRate:        (id: number)                             => Promise<{ rate: number; updated_at: string } | null>
+        listCategoryLimits: (budgetId: number)                       => Promise<BudgetCategoryLimit[]>
+        setCategoryLimit:   (p: { budget_id: number; category_id: number; monthly_limit: number }) => Promise<BudgetCategoryLimit>
+        deleteCategoryLimit:(p: { budget_id: number; category_id: number }) => Promise<boolean>
+        categorySpending:   (budgetId: number)                       => Promise<CategorySpendingResult>
+        wizardStart:        (p: object)                              => Promise<{ budgetId: number; ok: boolean }>
+        onWizardChunk:      (cb: (chunk: string) => void)           => () => void
+        onWizardDone:       (cb: (data: { budgetId: number }) => void) => () => void
       }
       updater: {
         checkNow: () => Promise<{ ok?: boolean; error?: boolean; skipped?: boolean }>

@@ -1,7 +1,7 @@
 import { NavLink } from 'react-router-dom'
 import {
   Home, FolderOpen, Calendar, NotebookPen, PenLine, Settings,
-  PanelLeftClose, PanelLeftOpen, Sparkles, EyeOff
+  PanelLeftClose, PanelLeftOpen, Sparkles, EyeOff, Wallet
 } from 'lucide-react'
 import type { SidebarState } from '../App'
 import { useAiStream } from '../context/AiStreamContext'
@@ -94,6 +94,7 @@ export default function Sidebar({ state, onChange }: Props): React.JSX.Element {
     { to: '/calendar', label: 'Calendrier', icon: Calendar,    end: false, badge: false },
     { to: '/notes',    label: 'Notes',      icon: NotebookPen, end: false, badge: false },
     { to: '/canvas',   label: 'Canvas',     icon: PenLine,     end: false, badge: false },
+    { to: '/budget',   label: 'Budget',     icon: Wallet,      end: false, badge: false },
   ]
 
   const BOTTOM_ITEMS = [

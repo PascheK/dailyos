@@ -123,6 +123,59 @@ function buildSystemPrompt(mode: ReasoningMode, profile: UserProfile | null): st
     notesSection += `\nAutres notes : ${noteTitlesOnly.join(', ')}\n`
   }
 
+  // ── Budget ───────────────────────────────────────────────────────────────
+  let budgetSection = ''
+  try {
+    const budgets = db.prepare('SELECT * FROM budgets ORDER BY created_at DESC LIMIT 3').all() as {
+      id: number; name: string; total_amount: number; currency: string
+      start_date: string; end_date: string
+    }[]
+
+    if (budgets.length > 0) {
+      budgetSection = '\n## Budgets actifs\n'
+      for (const b of budgets) {
+        const extras = db.prepare('SELECT COALESCE(SUM(amount),0) as s FROM budget_extra_items WHERE budget_id = ?').get(b.id) as { s: number }
+        const spent  = db.prepare(
+          `SELECT COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) -
+                  COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as net
+           FROM budget_transactions WHERE budget_id = ?`
+        ).get(b.id) as { net: number }
+        const available  = b.total_amount - extras.s
+        const remaining  = available - (spent.net ?? 0)
+        // Mois courant
+        const ym = `${new Date().getFullYear()}-${String(new Date().getMonth() + 1).padStart(2,'0')}`
+        const periodStart = `${ym}-01`
+        const periodSpent = db.prepare(
+          `SELECT COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as s
+           FROM budget_transactions WHERE budget_id = ? AND date >= ?`
+        ).get(b.id, periodStart) as { s: number }
+        const goal = db.prepare(
+          'SELECT monthly_target, critical_threshold FROM budget_ai_goals WHERE budget_id = ? ORDER BY recalculated_at DESC LIMIT 1'
+        ).get(b.id) as { monthly_target: number; critical_threshold: number } | undefined
+
+        budgetSection += `\n### Budget : ${b.name}\n`
+        budgetSection += `- Période : ${b.start_date} → ${b.end_date}\n`
+        budgetSection += `- Total : ${b.total_amount} ${b.currency} | Hors-budget : ${extras.s} ${b.currency}\n`
+        budgetSection += `- Restant : ${remaining.toFixed(2)} ${b.currency}\n`
+        budgetSection += `- Dépensé ce mois : ${periodSpent.s.toFixed(2)} ${b.currency}\n`
+        if (goal) {
+          budgetSection += `- Objectif mensuel : ${goal.monthly_target.toFixed(2)} ${b.currency} | Seuil critique : ${goal.critical_threshold.toFixed(2)} ${b.currency}\n`
+        }
+        const recentTx = db.prepare(
+          `SELECT t.date, t.amount_base, t.is_revenue, c.name as cat
+           FROM budget_transactions t LEFT JOIN budget_categories c ON t.category_id = c.id
+           WHERE t.budget_id = ? ORDER BY t.date DESC LIMIT 5`
+        ).all(b.id) as { date: string; amount_base: number; is_revenue: number; cat: string | null }[]
+        if (recentTx.length > 0) {
+          budgetSection += `- Dernières transactions :\n`
+          for (const tx of recentTx) {
+            budgetSection += `  - ${tx.date} | ${tx.is_revenue ? '+' : '-'}${tx.amount_base.toFixed(2)}${b.currency} | ${tx.cat ?? 'Autre'}\n`
+          }
+        }
+      }
+    }
+  } catch { /* silencieux si tables pas encore créées */ }
+
   const modeInstruction = REASONING_INSTRUCTIONS[mode] ?? REASONING_INSTRUCTIONS.direct
 
   return `Tu es **DailyOS Assistant**, un assistant de productivité personnel intégré à DailyOS.
@@ -132,7 +185,7 @@ ${profileSection}
 - **Date du jour :** ${today}
 - **Datetime ISO actuelle :** ${isoNow}
 - **Fichiers stockés :** ${fileCount}
-${agendaSection}${notesSection}
+${agendaSection}${notesSection}${budgetSection}
 ## Mode de réponse actif
 ${modeInstruction}
 

@@ -15,6 +15,7 @@ import { registerWhiteboardHandlers } from './handler/whiteboard'
 import { registerSettingsHandlers } from './handler/settings'
 import { registerAiHandlers } from './handler/ai'
 import { registerOllamaHandlers } from './handler/ollama'
+import { registerBudgetHandlers } from './handler/budget'
 
 // ── Protocole local-file:// ────────────────────────────────────────────────
 // Doit être appelé AVANT app.ready (contrainte Electron).
@@ -156,6 +157,7 @@ app.whenReady().then(() => {
   registerSettingsHandlers()
   registerAiHandlers()
   registerOllamaHandlers()
+  registerBudgetHandlers()
 
   // Default open or close DevTools by F12 in development
   // and ignore CommandOrControl + R in production.
