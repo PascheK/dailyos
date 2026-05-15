@@ -9,8 +9,11 @@ import { PublisherGithub } from '@electron-forge/publisher-github'
 const config: ForgeConfig = {
   packagerConfig: {
     asar: {
-      unpack: '**/node_modules/{better-sqlite3,bindings,file-uri-to-path,node-gyp-build}/**'
+      unpack: '*.{node,dll}'
     },
+    ignore: [
+      /node_modules\/(?!(better-sqlite3|bindings|file-uri-to-path|node-gyp-build)(\/))/
+    ],
     appBundleId: 'com.killian.dailyos',
     name: 'DailyOS',
     executableName: 'dailyos',
