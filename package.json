@@ -1,6 +1,6 @@
 {
   "name": "dailyos",
-  "version": "1.0.12",
+  "version": "1.0.13",
   "description": "Ton assistant de productivité personnel",
   "main": ".vite/build/index.js",
   "author": {
