@@ -126,6 +126,12 @@ declare global {
         rename: (id: number, title: string)      => Promise<void>
         delete: (id: number)                     => Promise<void>
       }
+      updater: {
+        onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
+      }
+      shell: {
+        openExternal: (url: string) => Promise<void>
+      }
     }
   } // fin interface Window
 } // fin declare global

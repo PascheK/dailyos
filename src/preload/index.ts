@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from 'electron'
+import { contextBridge, ipcRenderer, shell } from 'electron'
 
 const api = {
   calendar: {
@@ -88,6 +88,13 @@ const api = {
       return () => ipcRenderer.removeListener('ollama:pull:error', h)
     }
   },
+  updater: {
+    onUpdateAvailable: (cb: (info: { version: string }) => void) => {
+      const handler = (_: unknown, info: { version: string }): void => cb(info)
+      ipcRenderer.on('update:available', handler)
+      return () => ipcRenderer.removeListener('update:available', handler)
+    }
+  },
   settings: {
     get:          ()                                          => ipcRenderer.invoke('settings:get'),
     patch:        (patch: object)                             => ipcRenderer.invoke('settings:patch', patch),
@@ -101,4 +108,9 @@ const api = {
   }
 }
 
-contextBridge.exposeInMainWorld('api', api)
+contextBridge.exposeInMainWorld('api', {
+  ...api,
+  shell: {
+    openExternal: (url: string) => shell.openExternal(url)
+  }
+})

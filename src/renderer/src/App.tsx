@@ -1,7 +1,7 @@
 import { useState, useEffect } from 'react'
 import { HashRouter, Routes, Route, useLocation } from 'react-router-dom'
 import { COLOR_THEMES, applyTheme } from './types/settings'
-import { PanelLeftOpen } from 'lucide-react'
+import { PanelLeftOpen, Download, X } from 'lucide-react'
 import { Home } from './pages/Home'
 import { Files } from './pages/Files'
 import { Notes } from './pages/Notes'
@@ -15,6 +15,28 @@ import { AiStreamProvider } from './context/AiStreamContext'
 import { SetupWizard } from './components/SetupWizard'
 
 export type SidebarState = 'expanded' | 'collapsed' | 'hidden'
+
+// ── Popup mise à jour ──────────────────────────────────────────────────────────
+function UpdateBanner({ version, onDismiss }: { version: string; onDismiss: () => void }): React.JSX.Element {
+  return (
+    <div className="fixed bottom-5 right-5 z-50 flex items-center gap-3 px-4 py-3 bg-slate-800 border border-[var(--color-primary)]/40 rounded-2xl shadow-xl shadow-black/40 animate-fade-in">
+      <div className="flex flex-col">
+        <span className="text-xs font-semibold text-white">Mise à jour disponible — v{version}</span>
+        <span className="text-[11px] text-slate-400">Télécharge la nouvelle version sur GitHub</span>
+      </div>
+      <button
+        onClick={() => window.api.shell.openExternal('https://github.com/PascheK/dailyos/releases/latest')}
+        className="flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:opacity-90 rounded-xl text-white text-xs font-medium transition-all shrink-0"
+      >
+        <Download className="w-3.5 h-3.5" />
+        Télécharger
+      </button>
+      <button onClick={onDismiss} className="text-slate-600 hover:text-slate-400 transition-colors">
+        <X className="w-4 h-4" />
+      </button>
+    </div>
+  )
+}
 
 // ── Routes animées ─────────────────────────────────────────────────────────────
 function AnimatedRoutes({ sidebar, onSidebarChange }: {
@@ -51,6 +73,7 @@ function AnimatedRoutes({ sidebar, onSidebarChange }: {
 
 function App(): React.JSX.Element {
   const [setupDone, setSetupDone] = useState<boolean | null>(null)
+  const [updateVersion, setUpdateVersion] = useState<string | null>(null)
 
   // Applique le thème + préférences d'animation au démarrage
   useEffect(() => {
@@ -61,6 +84,12 @@ function App(): React.JSX.Element {
     })
     // Vérifier si le wizard a déjà été complété
     setSetupDone(localStorage.getItem('dailyos:setup-done') === 'true')
+
+    // Écouter les mises à jour disponibles
+    const unsub = window.api.updater.onUpdateAvailable((info) => {
+      setUpdateVersion(info.version)
+    })
+    return unsub
   }, [])
 
   const [sidebar, setSidebar] = useState<SidebarState>(() => {
@@ -80,6 +109,9 @@ function App(): React.JSX.Element {
   return (
     <AiStreamProvider>
       <HashRouter>
+        {updateVersion && (
+          <UpdateBanner version={updateVersion} onDismiss={() => setUpdateVersion(null)} />
+        )}
         {/* Wizard premier lancement */}
         {!setupDone && (
           <SetupWizard onComplete={() => setSetupDone(true)} />

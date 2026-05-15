@@ -170,13 +170,17 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Auto-update — uniquement en production (pas en dev)
-  // Vérifie les releases GitHub et installe en tâche de fond
+  // Auto-update — détecte les mises à jour et notifie le renderer via IPC
   if (!is.dev) {
-    autoUpdater.checkForUpdatesAndNotify().catch((e) => {
-      console.error('Auto-updater error:', e)
+    autoUpdater.on('update-available', (info) => {
+      const win = BrowserWindow.getAllWindows()[0]
+      if (win) win.webContents.send('update:available', { version: info.version })
+    })
+    autoUpdater.checkForUpdates().catch(() => {
+      // Silencieux — app-update.yml absent sur les builds non publiés
     })
   }
+
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

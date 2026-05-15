@@ -35,6 +35,12 @@ declare global {
         rename: (id: number, title: string)      => Promise<boolean>
         delete: (id: number)                     => Promise<boolean>
       }
+      updater: {
+        onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
+      }
+      shell: {
+        openExternal: (url: string) => Promise<void>
+      }
     }
   }
 }
