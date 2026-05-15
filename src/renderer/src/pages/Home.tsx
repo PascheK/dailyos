@@ -1,13 +1,17 @@
 import { useEffect, useState, useCallback, useRef } from 'react'
 import { useNavigate } from 'react-router-dom'
-import GridLayout, { type Layout } from 'react-grid-layout'
+import GridLayoutLib from 'react-grid-layout'
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const GridLayout = GridLayoutLib as React.ComponentType<any>
 import 'react-grid-layout/css/styles.css'
 import 'react-resizable/css/styles.css'
 import {
-  Calendar, FileText, NotebookPen, ArrowRight, Clock,
+  Calendar, FileText, ArrowRight, Clock,
   CalendarX, FolderOpen, Sparkles, GripHorizontal,
-  CalendarDays, Zap, StickyNote, Send, X
+  CalendarDays, Zap, StickyNote, Send, X, Settings2, RotateCcw
 } from 'lucide-react'
+
+type LayoutItem = { i: string; x: number; y: number; w: number; h: number; minW?: number; minH?: number }
 import type { CalendarEvent } from '../types/calendar'
 import type { AppFile } from '../types/files'
 
@@ -16,19 +20,30 @@ import type { AppFile } from '../types/files'
 const MONTHS = ['janvier','février','mars','avril','mai','juin','juillet','août','septembre','octobre','novembre','décembre']
 const DAYS   = ['Dimanche','Lundi','Mardi','Mercredi','Jeudi','Vendredi','Samedi']
 
-// v2 — layout repensé pour tenir dans l'écran sans scroll
-const STORAGE_KEY = 'dailyos:home-layout-v2'
+const STORAGE_KEY         = 'dailyos:home-layout-v4'
+const STORAGE_KEY_VISIBLE = 'dailyos:home-visible-v1'
 
 type WidgetId = 'clock' | 'events' | 'files' | 'quicknote' | 'aishortcuts'
 
-const DEFAULT_LAYOUT: Layout[] = [
-  { i: 'clock',       x: 0, y: 0,  w: 4, h: 3, minW: 3, minH: 2 },
-  { i: 'events',      x: 4, y: 0,  w: 5, h: 7, minW: 3, minH: 3 },
-  { i: 'files',       x: 9, y: 0,  w: 5, h: 7, minW: 3, minH: 3 },
-  { i: 'quicknote',   x: 0, y: 3,  w: 4, h: 7, minW: 3, minH: 3 },
-  { i: 'aishortcuts', x: 4, y: 7,  w: 10, h: 3, minW: 4, minH: 2 },
+const WIDGET_META: Record<WidgetId, { label: string; icon: React.ElementType }> = {
+  clock:       { label: 'Horloge',          icon: Clock },
+  events:      { label: 'Événements',       icon: CalendarDays },
+  files:       { label: 'Fichiers récents', icon: FolderOpen },
+  quicknote:   { label: 'Note rapide',      icon: StickyNote },
+  aishortcuts: { label: 'Raccourcis IA',    icon: Sparkles },
+}
+
+const ALL_WIDGET_IDS: WidgetId[] = ['clock', 'events', 'files', 'quicknote', 'aishortcuts']
+
+// Layout compact — tout tient sans scroll sur ~900px de hauteur
+const DEFAULT_LAYOUT: LayoutItem[] = [
+  { i: 'clock',       x: 0,  y: 0, w: 3, h: 3, minW: 2, minH: 2 },
+  { i: 'events',      x: 3,  y: 0, w: 4, h: 5, minW: 3, minH: 3 },
+  { i: 'files',       x: 7,  y: 0, w: 4, h: 5, minW: 3, minH: 3 },
+  { i: 'quicknote',   x: 11, y: 0, w: 3, h: 5, minW: 2, minH: 3 },
+  { i: 'aishortcuts', x: 0,  y: 5, w: 14, h: 3, minW: 4, minH: 2 },
 ]
-// Total : 10 rangées × 36px + 9 × 10px margin + 28px padding = ~478px → pas de scroll
+// 8 rangées × 32px + 7 × 8px + 24px padding = ~336px
 
 // ── Utilitaires ───────────────────────────────────────────────────────────────
 
@@ -73,8 +88,7 @@ function Widget({
     <div className={`flex flex-col h-full bg-slate-900 rounded-2xl border transition-all ${
       dragging ? 'border-[var(--color-primary)]/40 shadow-lg shadow-[var(--color-primary)]/10' : 'border-slate-700/50 hover:border-slate-600/70'
     }`}>
-      {/* Header widget */}
-      <div className="flex items-center justify-between px-3 pt-3 pb-1.5 shrink-0">
+      <div className="flex items-center justify-between px-3 pt-2.5 pb-1 shrink-0">
         <div className="flex items-center gap-1.5">
           <Icon className="w-3 h-3 text-[var(--color-primary)]" />
           <span className="text-[10px] font-semibold text-slate-600 uppercase tracking-wider">{title}</span>
@@ -86,14 +100,12 @@ function Widget({
               Voir tout <ArrowRight className="w-2.5 h-2.5" />
             </button>
           )}
-          {/* Drag handle */}
           <div className="widget-drag-handle cursor-grab active:cursor-grabbing text-slate-700 hover:text-slate-500 transition-colors">
             <GripHorizontal className="w-3.5 h-3.5" />
           </div>
         </div>
       </div>
-      {/* Contenu scrollable */}
-      <div className="flex-1 overflow-auto px-3 pb-3 min-h-0">
+      <div className="flex-1 overflow-auto px-3 pb-2.5 min-h-0">
         {children}
       </div>
     </div>
@@ -119,7 +131,7 @@ function ClockWidget({ userName }: { userName: string }): React.JSX.Element {
     <div className="flex flex-col justify-center h-full gap-0.5">
       <p className="text-3xl font-bold text-white font-mono tracking-tight leading-none">{timeStr}</p>
       <p className="text-xs text-slate-400 mt-0.5">{dateStr}</p>
-      <p className="text-[11px] text-slate-600 mt-2">{greeting}{userName ? `, ${userName}` : ''} 👋</p>
+      <p className="text-[11px] text-slate-600 mt-1.5">{greeting}{userName ? `, ${userName}` : ''} 👋</p>
     </div>
   )
 }
@@ -132,25 +144,25 @@ function EventsWidget({
   events: CalendarEvent[]; loading: boolean; navigate: (p: string) => void
 }): React.JSX.Element {
   if (loading) return (
-    <div className="flex flex-col gap-2 pt-1">
-      {[1,2,3].map(i => <div key={i} className="h-12 bg-slate-800 rounded-xl animate-pulse" />)}
+    <div className="flex flex-col gap-1.5 pt-1">
+      {[1,2,3].map(i => <div key={i} className="h-10 bg-slate-800 rounded-xl animate-pulse" />)}
     </div>
   )
   if (!events.length) return (
     <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-700">
-      <CalendarX className="w-8 h-8" />
-      <p className="text-sm">Aucun événement aujourd'hui</p>
+      <CalendarX className="w-7 h-7" />
+      <p className="text-xs">Aucun événement aujourd'hui</p>
     </div>
   )
   return (
     <div className="flex flex-col gap-1 pt-0.5">
       {events.map(ev => (
         <div key={ev.id} onClick={() => navigate('/calendar')}
-          className="flex items-center gap-2.5 px-2.5 py-2 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer group"
+          className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer group"
           style={{ borderLeft: `2px solid ${ev.color ?? 'var(--color-primary)'}` }}>
           <div className="flex-1 min-w-0">
             <p className="text-xs font-medium text-white truncate">{ev.title}</p>
-            <p className="text-[11px] text-slate-500">
+            <p className="text-[10px] text-slate-500">
               {ev.all_day ? 'Toute la journée' : `${fmtTime(ev.start_at)} → ${fmtTime(ev.end_at)}`}
             </p>
           </div>
@@ -169,22 +181,19 @@ function FilesWidget({
   files: AppFile[]; loading: boolean; navigate: (p: string) => void
 }): React.JSX.Element {
   const handleOpen = (f: AppFile): void => {
-    if (f.mime_type === 'text/markdown') {
-      navigate(`/notes`)
-    } else {
-      void window.api.files.open(f.path)
-    }
+    if (f.mime_type === 'text/markdown') navigate('/notes')
+    else void window.api.files.open(f.path)
   }
 
   if (loading) return (
-    <div className="flex flex-col gap-2 pt-1">
-      {[1,2,3].map(i => <div key={i} className="h-12 bg-slate-800 rounded-xl animate-pulse" />)}
+    <div className="flex flex-col gap-1.5 pt-1">
+      {[1,2,3].map(i => <div key={i} className="h-10 bg-slate-800 rounded-xl animate-pulse" />)}
     </div>
   )
   if (!files.length) return (
     <div className="flex flex-col items-center justify-center h-full gap-2 text-slate-700">
-      <FolderOpen className="w-8 h-8" />
-      <p className="text-sm">Aucun fichier récent</p>
+      <FolderOpen className="w-7 h-7" />
+      <p className="text-xs">Aucun fichier récent</p>
     </div>
   )
   return (
@@ -193,8 +202,8 @@ function FilesWidget({
         const badge = fileBadge(f.mime_type)
         return (
           <div key={f.id} onClick={() => handleOpen(f)}
-            className="flex items-center gap-2.5 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer group">
-            <div className={`w-7 h-7 rounded-md flex items-center justify-center text-[9px] font-bold shrink-0 ${badge.cls}`}>
+            className="flex items-center gap-2 px-2 py-1.5 rounded-lg hover:bg-slate-800 transition-colors cursor-pointer group">
+            <div className={`w-6 h-6 rounded-md flex items-center justify-center text-[9px] font-bold shrink-0 ${badge.cls}`}>
               {badge.label}
             </div>
             <div className="flex-1 min-w-0">
@@ -216,7 +225,6 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
   const [content, setContent] = useState('')
   const [saving,  setSaving]  = useState(false)
   const [saved,   setSaved]   = useState(false)
-  const textareaRef = useRef<HTMLTextAreaElement>(null)
 
   const handleCreate = async (): Promise<void> => {
     const t = title.trim() || 'Note rapide'
@@ -233,7 +241,7 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
   }
 
   return (
-    <div className="flex flex-col gap-2 h-full">
+    <div className="flex flex-col gap-1.5 h-full">
       <input
         value={title}
         onChange={e => setTitle(e.target.value)}
@@ -241,7 +249,6 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
         className="w-full bg-slate-800 border border-slate-700 rounded-lg px-2.5 py-1.5 text-xs text-white placeholder-slate-600 focus:outline-none focus:border-[var(--color-primary)] transition-colors"
       />
       <textarea
-        ref={textareaRef}
         value={content}
         onChange={e => setContent(e.target.value)}
         placeholder="Commence à écrire…"
@@ -250,7 +257,7 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
       <div className="flex gap-1.5 shrink-0">
         <button onClick={() => { setTitle(''); setContent('') }} disabled={!title && !content}
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-600 hover:text-slate-400 disabled:opacity-30 transition-colors">
-          <X className="w-3.5 h-3.5" />
+          <X className="w-3 h-3" />
         </button>
         <button onClick={() => void handleCreate()} disabled={saving || (!title.trim() && !content.trim())}
           className="flex-1 flex items-center justify-center gap-1 py-1.5 bg-[var(--color-primary)] hover:opacity-90 disabled:opacity-40 rounded-lg text-white text-xs font-medium transition-all">
@@ -258,7 +265,7 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
         </button>
         <button onClick={() => navigate('/notes')}
           className="p-1.5 rounded-lg hover:bg-slate-800 text-slate-600 hover:text-slate-400 transition-colors">
-          <ArrowRight className="w-3.5 h-3.5" />
+          <ArrowRight className="w-3 h-3" />
         </button>
       </div>
     </div>
@@ -268,17 +275,17 @@ function QuickNoteWidget({ navigate }: { navigate: (p: string) => void }): React
 // ── Widget Raccourcis IA ──────────────────────────────────────────────────────
 
 const AI_SHORTCUTS = [
-  { label: 'Résume ma journée',       icon: Calendar,     prompt: 'Résume ma journée et mes priorités' },
-  { label: 'Créer un événement',      icon: CalendarDays, prompt: 'Crée un événement dans mon calendrier' },
-  { label: 'Idées créatives',         icon: Sparkles,     prompt: 'Donne-moi 5 idées créatives pour aujourd\'hui' },
-  { label: 'Aide-moi à planifier',    icon: Zap,          prompt: 'Aide-moi à planifier ma semaine' },
-  { label: 'Rédige une note',         icon: StickyNote,   prompt: 'Aide-moi à rédiger une note structurée' },
-  { label: 'Brainstorming',           icon: FileText,     prompt: 'Lance un brainstorming sur un projet' },
+  { label: 'Résume ma journée',    icon: Calendar,     prompt: 'Résume ma journée et mes priorités' },
+  { label: 'Créer un événement',   icon: CalendarDays, prompt: 'Crée un événement dans mon calendrier' },
+  { label: 'Idées créatives',      icon: Sparkles,     prompt: 'Donne-moi 5 idées créatives pour aujourd\'hui' },
+  { label: 'Planifier ma semaine', icon: Zap,          prompt: 'Aide-moi à planifier ma semaine' },
+  { label: 'Rédige une note',      icon: StickyNote,   prompt: 'Aide-moi à rédiger une note structurée' },
+  { label: 'Brainstorming',        icon: FileText,     prompt: 'Lance un brainstorming sur un projet' },
 ]
 
 function AiShortcutsWidget({ navigate }: { navigate: (p: string) => void }): React.JSX.Element {
   return (
-    <div className="grid grid-cols-3 gap-1.5 pt-0.5 h-full content-start">
+    <div className="grid grid-cols-3 gap-1 h-full content-start pt-0.5">
       {AI_SHORTCUTS.map(s => {
         const Icon = s.icon
         return (
@@ -287,12 +294,66 @@ function AiShortcutsWidget({ navigate }: { navigate: (p: string) => void }): Rea
               sessionStorage.setItem('dailyos:ai-prefill', s.prompt)
               navigate('/ai')
             }}
-            className="flex items-center gap-2 px-2.5 py-2 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 hover:border-[var(--color-primary)]/30 rounded-lg text-left transition-all group">
-            <Icon className="w-3.5 h-3.5 text-[var(--color-primary)] shrink-0" />
-            <span className="text-[11px] text-slate-300 group-hover:text-white transition-colors leading-tight">{s.label}</span>
+            className="flex items-center gap-1.5 px-2 py-1.5 bg-slate-800 hover:bg-slate-700 border border-slate-700/60 hover:border-[var(--color-primary)]/30 rounded-lg text-left transition-all group">
+            <Icon className="w-3 h-3 text-[var(--color-primary)] shrink-0" />
+            <span className="text-[10px] text-slate-300 group-hover:text-white transition-colors leading-tight truncate">{s.label}</span>
           </button>
         )
       })}
+    </div>
+  )
+}
+
+// ── Panneau de personnalisation ───────────────────────────────────────────────
+
+function CustomizePanel({
+  visible, onToggle, onReset, onClose
+}: {
+  visible: Set<WidgetId>
+  onToggle: (id: WidgetId) => void
+  onReset: () => void
+  onClose: () => void
+}): React.JSX.Element {
+  return (
+    <div className="absolute top-10 right-4 z-50 w-56 bg-slate-900 border border-slate-700 rounded-2xl shadow-xl shadow-black/40 p-3 flex flex-col gap-2">
+      <div className="flex items-center justify-between pb-1 border-b border-slate-800">
+        <span className="text-[11px] font-semibold text-slate-400 uppercase tracking-wider">Widgets</span>
+        <button onClick={onClose} className="text-slate-600 hover:text-slate-400 transition-colors">
+          <X className="w-3.5 h-3.5" />
+        </button>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        {ALL_WIDGET_IDS.map(id => {
+          const { label, icon: Icon } = WIDGET_META[id]
+          const isVisible = visible.has(id)
+          return (
+            <button key={id} onClick={() => onToggle(id)}
+              className={`flex items-center gap-2.5 px-2.5 py-2 rounded-xl transition-all text-left ${
+                isVisible
+                  ? 'bg-[var(--color-primary)]/10 border border-[var(--color-primary)]/20 text-white'
+                  : 'bg-slate-800/60 border border-transparent text-slate-500 hover:text-slate-400'
+              }`}>
+              <Icon className={`w-3.5 h-3.5 shrink-0 ${isVisible ? 'text-[var(--color-primary)]' : 'text-slate-600'}`} />
+              <span className="text-xs flex-1">{label}</span>
+              {/* Toggle indicator */}
+              <div className={`w-7 h-4 rounded-full transition-all flex items-center px-0.5 ${
+                isVisible ? 'bg-[var(--color-primary)]' : 'bg-slate-700'
+              }`}>
+                <div className={`w-3 h-3 rounded-full bg-white transition-transform ${
+                  isVisible ? 'translate-x-3' : 'translate-x-0'
+                }`} />
+              </div>
+            </button>
+          )
+        })}
+      </div>
+
+      <button onClick={onReset}
+        className="flex items-center justify-center gap-1.5 py-1.5 mt-1 text-[11px] text-slate-600 hover:text-slate-400 transition-colors border-t border-slate-800 pt-2">
+        <RotateCcw className="w-3 h-3" />
+        Réinitialiser la grille
+      </button>
     </div>
   )
 }
@@ -307,17 +368,36 @@ export function Home(): React.JSX.Element {
   const [files,   setFiles]     = useState<AppFile[]>([])
   const [userName, setUserName] = useState('')
   const [isDragging, setIsDragging] = useState(false)
+  const [showCustomize, setShowCustomize] = useState(false)
+
+  // Widgets visibles
+  const [visible, setVisible] = useState<Set<WidgetId>>(() => {
+    try {
+      const saved = localStorage.getItem(STORAGE_KEY_VISIBLE)
+      if (saved) return new Set(JSON.parse(saved) as WidgetId[])
+    } catch { /* ignore */ }
+    return new Set(ALL_WIDGET_IDS)
+  })
+
+  const toggleWidget = useCallback((id: WidgetId) => {
+    setVisible(prev => {
+      const next = new Set(prev)
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      localStorage.setItem(STORAGE_KEY_VISIBLE, JSON.stringify([...next]))
+      return next
+    })
+  }, [])
 
   // Layout persisté
-  const [layout, setLayout] = useState<Layout[]>(() => {
+  const [layout, setLayout] = useState<LayoutItem[]>(() => {
     try {
       const saved = localStorage.getItem(STORAGE_KEY)
-      if (saved) return JSON.parse(saved) as Layout[]
+      if (saved) return JSON.parse(saved) as LayoutItem[]
     } catch { /* ignore */ }
     return DEFAULT_LAYOUT
   })
 
-  // Dimensions du conteneur pour GridLayout
   const containerRef = useRef<HTMLDivElement>(null)
   const [width, setWidth] = useState(1200)
 
@@ -345,15 +425,39 @@ export function Home(): React.JSX.Element {
     })
   }, [])
 
-  const handleLayoutChange = useCallback((newLayout: Layout[]) => {
-    setLayout(newLayout)
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(newLayout))
+  // Merge les nouvelles positions (widgets visibles) dans le layout complet
+  // pour ne pas perdre la position des widgets cachés
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const handleLayoutChange = useCallback((newLayout: any) => {
+    const updated = newLayout as LayoutItem[]
+    setLayout(prev => {
+      const merged = prev.map(item => {
+        const found = updated.find(n => n.i === item.i)
+        return found ? { ...item, ...found } : item
+      })
+      localStorage.setItem(STORAGE_KEY, JSON.stringify(merged))
+      return merged
+    })
   }, [])
 
   const resetLayout = (): void => {
     setLayout(DEFAULT_LAYOUT)
+    setVisible(new Set(ALL_WIDGET_IDS))
     localStorage.removeItem(STORAGE_KEY)
+    localStorage.removeItem(STORAGE_KEY_VISIBLE)
+    setShowCustomize(false)
   }
+
+  // Fermer le panneau en cliquant ailleurs
+  useEffect(() => {
+    if (!showCustomize) return
+    const handler = (e: MouseEvent): void => {
+      const panel = document.getElementById('customize-panel')
+      if (panel && !panel.contains(e.target as Node)) setShowCustomize(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showCustomize])
 
   const widgets: Record<WidgetId, React.JSX.Element> = {
     clock: (
@@ -387,22 +491,44 @@ export function Home(): React.JSX.Element {
     ),
   }
 
+  // Layout filtré selon les widgets visibles
+  const activeLayout = layout.filter(item => visible.has(item.i as WidgetId))
+
   return (
     <div ref={containerRef} className="h-full overflow-auto relative">
-      {/* Bouton reset layout */}
-      <button onClick={resetLayout}
-        className="absolute top-4 right-4 z-10 text-[11px] text-slate-700 hover:text-slate-500 transition-colors">
-        Réinitialiser la grille
+      {/* Bouton personnaliser */}
+      <button
+        id="customize-btn"
+        onClick={() => setShowCustomize(v => !v)}
+        className={`absolute top-4 right-4 z-10 flex items-center gap-1.5 px-2.5 py-1.5 rounded-xl border text-[11px] font-medium transition-all ${
+          showCustomize
+            ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
+            : 'bg-slate-800/60 border-slate-700 text-slate-500 hover:text-slate-300 hover:border-slate-600'
+        }`}>
+        <Settings2 className="w-3.5 h-3.5" />
+        Personnaliser
       </button>
+
+      {/* Panneau de personnalisation */}
+      {showCustomize && (
+        <div id="customize-panel">
+          <CustomizePanel
+            visible={visible}
+            onToggle={toggleWidget}
+            onReset={resetLayout}
+            onClose={() => setShowCustomize(false)}
+          />
+        </div>
+      )}
 
       <GridLayout
         className="layout"
-        layout={layout}
+        layout={activeLayout}
         cols={14}
-        rowHeight={36}
+        rowHeight={32}
         width={width}
-        margin={[10, 10]}
-        containerPadding={[14, 14]}
+        margin={[8, 8]}
+        containerPadding={[12, 12]}
         draggableHandle=".widget-drag-handle"
         onLayoutChange={handleLayoutChange}
         onDragStart={() => setIsDragging(true)}
@@ -411,7 +537,7 @@ export function Home(): React.JSX.Element {
         onResizeStop={() => setIsDragging(false)}
         useCSSTransforms
       >
-        {layout.map(item => (
+        {activeLayout.map(item => (
           <div key={item.i}>
             {widgets[item.i as WidgetId]}
           </div>
