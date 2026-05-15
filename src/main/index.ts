@@ -2,12 +2,11 @@
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string
 declare const MAIN_WINDOW_VITE_NAME: string
 
-import { app, shell, BrowserWindow, ipcMain, protocol } from 'electron'
+import { app, shell, BrowserWindow, ipcMain, protocol, net } from 'electron'
 import { join } from 'path'
 import { createReadStream, promises as fs } from 'fs'
 import { Readable } from 'stream'
 import { electronApp, optimizer, is } from '@electron-toolkit/utils'
-import { autoUpdater } from 'electron-updater'
 const icon = join(__dirname, '../../resources/icon.png')
 import './db'
 import { registerCalendarHandlers } from './handler/calendar'
@@ -170,24 +169,25 @@ app.whenReady().then(() => {
 
   createWindow()
 
-  // Auto-update — piloté depuis le renderer via IPC
-  if (!is.dev) {
-    autoUpdater.on('update-available', (info) => {
-      const win = BrowserWindow.getAllWindows()[0]
-      if (win) win.webContents.send('update:available', { version: info.version })
-    })
-    autoUpdater.on('update-not-available', () => {
-      const win = BrowserWindow.getAllWindows()[0]
-      if (win) win.webContents.send('update:not-available')
-    })
-  }
-
-  // Handler : le renderer déclenche la vérification
+  // Handler : le renderer déclenche la vérification via GitHub API
   ipcMain.handle('updater:check', async () => {
     if (is.dev) return { skipped: true }
     try {
-      await autoUpdater.checkForUpdates()
-      return { ok: true }
+      const response = await net.fetch(
+        'https://api.github.com/repos/PascheK/dailyos/releases/latest',
+        { headers: { 'User-Agent': 'DailyOS-App' } }
+      )
+      const data = await response.json() as { tag_name: string }
+      const latestVersion = data.tag_name.replace(/^v/, '')
+      const currentVersion = app.getVersion()
+      const win = BrowserWindow.getAllWindows()[0]
+      if (latestVersion !== currentVersion) {
+        if (win) win.webContents.send('update:available', { version: latestVersion })
+        return { ok: true, available: true }
+      } else {
+        if (win) win.webContents.send('update:not-available')
+        return { ok: true, available: false }
+      }
     } catch {
       return { error: true }
     }
