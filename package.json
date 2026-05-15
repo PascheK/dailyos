@@ -1,7 +1,7 @@
 {
   "name": "dailyos",
-  "version": "1.0.8",
-  "description": "Ton assistant de productivité personnel — Electron + React",
+  "version": "1.0.9",
+  "description": "Ton assistant de productivité personnel",
   "main": ".vite/build/index.js",
   "author": {
     "name": "Killian Pasche",
