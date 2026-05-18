@@ -62,6 +62,25 @@ export function registerSettingsHandlers(): void {
     return true
   })
 
+  // ── Reset total de toutes les données ─────────────────────────────────────
+
+  ipcMain.handle('settings:resetAll', () => {
+    // Supprime tout dans l'ordre (les foreign keys CASCADE s'occupent des enfants)
+    const tables = [
+      'budget_transactions', 'budget_extra_items', 'budget_categories',
+      'budget_recurring', 'budget_ai_goals', 'budget_category_limits',
+      'budgets',
+      'messages', 'conversations',
+      'events',
+      'files', 'folders',
+      'whiteboards',
+    ]
+    for (const t of tables) {
+      db.prepare(`DELETE FROM ${t}`).run()
+    }
+    return true
+  })
+
   // ── Info app ───────────────────────────────────────────────────────────────
 
   ipcMain.handle('settings:appInfo', () => ({

@@ -151,6 +151,7 @@ const api = {
     getApiKey:    (service: string)                           => ipcRenderer.invoke('settings:getApiKey', service),
     deleteApiKey: (service: string)                           => ipcRenderer.invoke('settings:deleteApiKey', service),
     export:       ()                                          => ipcRenderer.invoke('settings:export'),
+    resetAll:     ()                                          => ipcRenderer.invoke('settings:resetAll'),
     appInfo:      ()                                          => ipcRenderer.invoke('settings:appInfo'),
   }
 }

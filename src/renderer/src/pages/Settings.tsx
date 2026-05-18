@@ -1080,6 +1080,7 @@ function DataSection(): React.JSX.Element {
   const [exporting, setExporting] = useState(false)
   const [exported, setExported] = useState(false)
   const [resetting, setResetting] = useState(false)
+  const [deletingAll, setDeletingAll] = useState(false)
 
   const handleExport = async (): Promise<void> => {
     setExporting(true)
@@ -1098,6 +1099,16 @@ function DataSection(): React.JSX.Element {
       return
     setResetting(true)
     await window.api.settings.reset()
+    window.location.reload()
+  }
+
+  const handleDeleteAll = async (): Promise<void> => {
+    const confirmed = confirm(
+      '⚠️ SUPPRESSION TOTALE\n\nCette action va effacer TOUTES tes données :\n• Budgets, transactions, catégories\n• Calendrier\n• Fichiers et notes\n• Tableaux blancs\n• Conversations IA\n\nCette action est IRRÉVERSIBLE. Continuer ?'
+    )
+    if (!confirmed) return
+    setDeletingAll(true)
+    await window.api.settings.resetAll()
     window.location.reload()
   }
 
@@ -1148,10 +1159,12 @@ function DataSection(): React.JSX.Element {
         </div>
 
         {/* Danger zone */}
-        <div className="mt-4 p-4 bg-red-500/5 rounded-xl border border-red-500/20">
-          <p className="text-xs font-semibold text-red-400 uppercase tracking-wider mb-3">
+        <div className="mt-4 p-4 bg-red-500/5 rounded-xl border border-red-500/20 flex flex-col gap-4">
+          <p className="text-xs font-semibold text-red-400 uppercase tracking-wider">
             Zone de danger
           </p>
+
+          {/* Supprimer clés API */}
           <div className="flex items-center justify-between">
             <div>
               <p className="text-sm font-medium text-slate-200">Supprimer toutes les clés API</p>
@@ -1169,6 +1182,28 @@ function DataSection(): React.JSX.Element {
               className="flex items-center gap-2 px-4 py-2 bg-red-500/10 hover:bg-red-500/20 border border-red-500/30 rounded-xl text-sm font-medium text-red-400 transition-colors"
             >
               <Trash2 className="w-4 h-4" /> Effacer
+            </button>
+          </div>
+
+          {/* Suppression totale */}
+          <div className="flex items-center justify-between border-t border-red-500/10 pt-4">
+            <div>
+              <p className="text-sm font-medium text-red-300">Supprimer toutes les données</p>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Efface définitivement budgets, calendrier, notes, IA… Irréversible.
+              </p>
+            </div>
+            <button
+              onClick={() => void handleDeleteAll()}
+              disabled={deletingAll}
+              className="flex items-center gap-2 px-4 py-2 bg-red-600/20 hover:bg-red-600/30 border border-red-600/40 rounded-xl text-sm font-medium text-red-400 disabled:opacity-50 transition-colors"
+            >
+              {deletingAll ? (
+                <Loader2 className="w-4 h-4 animate-spin" />
+              ) : (
+                <Trash2 className="w-4 h-4" />
+              )}
+              Tout supprimer
             </button>
           </div>
         </div>

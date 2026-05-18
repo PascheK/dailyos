@@ -161,14 +161,22 @@ function checkAndNotify(budgetId: number): void {
 // ── Appliquer les récurrents ──────────────────────────────────────────────────
 
 function applyRecurring(budgetId: number): number {
+  const budget = db.prepare(
+    'SELECT currency, display_rate, start_date, end_date FROM budgets WHERE id = ?'
+  ).get(budgetId) as { currency: string; display_rate: number | null; start_date: string; end_date: string } | undefined
+  if (!budget) return 0
+
+  const today    = new Date()
+  const todayStr = today.toISOString().slice(0, 10)
+
+  // Ne rien appliquer si la période du budget n'est pas encore commencée ou déjà terminée
+  if (todayStr < budget.start_date || todayStr > budget.end_date) return 0
+
   const recurrings = db.prepare(
     'SELECT * FROM budget_recurring WHERE budget_id = ? AND active = 1'
   ).all(budgetId) as DbRecurring[]
 
-  const budget = db.prepare('SELECT currency FROM budgets WHERE id = ?').get(budgetId) as { currency: string }
   let applied = 0
-  const today = new Date()
-  const todayStr = today.toISOString().slice(0, 10)
 
   for (const r of recurrings) {
     if (r.recurrence_type === 'monthly') {
@@ -179,12 +187,8 @@ function applyRecurring(budgetId: number): number {
 
       // Convertir si nécessaire
       let amount_base = r.amount
-      if (r.currency !== budget.currency) {
-        // Utilise le taux stocké (si disponible), sinon 1:1
-        const rateRow = db.prepare(
-          'SELECT display_rate FROM budgets WHERE id = ?'
-        ).get(budgetId) as { display_rate: number | null }
-        if (rateRow.display_rate) amount_base = r.amount / rateRow.display_rate
+      if (r.currency !== budget.currency && budget.display_rate) {
+        amount_base = r.amount / budget.display_rate
       }
 
       const dateStr = `${ym}-${String(r.recurrence_day).padStart(2, '0')}`
@@ -203,9 +207,8 @@ function applyRecurring(budgetId: number): number {
       if (dayOfWeek < r.recurrence_day) continue
 
       let amount_base = r.amount
-      const rateRow = db.prepare('SELECT display_rate FROM budgets WHERE id = ?').get(budgetId) as { display_rate: number | null }
-      if (r.currency !== budget.currency && rateRow.display_rate) {
-        amount_base = r.amount / rateRow.display_rate
+      if (r.currency !== budget.currency && budget.display_rate) {
+        amount_base = r.amount / budget.display_rate
       }
 
       db.prepare(
@@ -414,6 +417,29 @@ function buildSummary(budgetId: number) {
   const display_savings = (budget.display_currency && budget.display_rate && savings > 0)
     ? savings * budget.display_rate : null
 
+  // Dépenses du jour courant
+  const todayISO = new Date().toISOString().slice(0, 10)
+  const dayAgg = db.prepare(
+    `SELECT
+      COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
+      COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
+     FROM budget_transactions WHERE budget_id = ? AND date = ?`
+  ).get(budgetId, todayISO) as { spent: number; revenue: number }
+  const day_spent = dayAgg.spent - dayAgg.revenue
+
+  // Dépenses de la semaine courante (lundi → aujourd'hui)
+  const dayOfWeek = (new Date().getDay() + 6) % 7  // 0=lundi … 6=dimanche
+  const weekStartDate = new Date()
+  weekStartDate.setDate(weekStartDate.getDate() - dayOfWeek)
+  const week_start = weekStartDate.toISOString().slice(0, 10)
+  const weekAgg = db.prepare(
+    `SELECT
+      COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
+      COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
+     FROM budget_transactions WHERE budget_id = ? AND date >= ? AND date <= ?`
+  ).get(budgetId, week_start, todayISO) as { spent: number; revenue: number }
+  const week_spent = weekAgg.spent - weekAgg.revenue
+
   return {
     budget, extra_items, extra_total, available_amount,
     total_spent: agg.spent, total_revenue: agg.revenue, net_spent, total_remaining,
@@ -421,7 +447,8 @@ function buildSummary(budgetId: number) {
     current_period_start: start, current_period_end: end,
     current_period_spent: periodAgg.spent, current_period_revenue: periodAgg.revenue,
     goal: goal ?? null, display_remaining, display_period_spent,
-    savings, display_savings, monthly_goal
+    savings, display_savings, monthly_goal,
+    day_spent, week_spent, week_start
   }
 }
 
@@ -566,11 +593,32 @@ export function registerBudgetHandlers(): void {
       }
     }
 
+    // ── Auto-catégorisation "Préparatifs" hors période ─────────────────────
+    let effectiveCategoryId = payload.category_id
+    const isOutsidePeriod =
+      !payload.is_revenue &&
+      (payload.date < budget.start_date || payload.date > budget.end_date)
+
+    if (isOutsidePeriod) {
+      // Cherche ou crée la catégorie "Préparatifs" spécifique à ce budget
+      let prepCat = db.prepare(
+        `SELECT id FROM budget_categories WHERE budget_id = ? AND name = 'Préparatifs' LIMIT 1`
+      ).get(payload.budget_id) as { id: number } | undefined
+
+      if (!prepCat) {
+        const ins = db.prepare(
+          `INSERT INTO budget_categories (budget_id, name, color) VALUES (?, 'Préparatifs', '#6366f1')`
+        ).run(payload.budget_id)
+        prepCat = { id: ins.lastInsertRowid as number }
+      }
+      effectiveCategoryId = prepCat.id
+    }
+
     const info = db.prepare(
       `INSERT INTO budget_transactions
        (budget_id, category_id, label, amount, currency, amount_base, date, is_revenue)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(payload.budget_id, payload.category_id, payload.label,
+    ).run(payload.budget_id, effectiveCategoryId, payload.label,
           payload.amount, payload.currency, amount_base, payload.date,
           payload.is_revenue ? 1 : 0)
 

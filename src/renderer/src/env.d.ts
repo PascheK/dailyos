@@ -120,6 +120,7 @@ declare global {
         getApiKey:    (service: string)                      => Promise<string>
         deleteApiKey: (service: string)                      => Promise<boolean>
         export:       ()                                     => Promise<boolean>
+        resetAll:     ()                                     => Promise<boolean>
         appInfo:      () => Promise<{
           version: string; platform: string; userData: string
           electron: string; node: string

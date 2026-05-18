@@ -141,6 +141,10 @@ export type BudgetSummary = {
   savings: number
   display_savings: number | null
   monthly_goal: number
+  // Vues par période
+  day_spent: number
+  week_spent: number
+  week_start: string
 }
 
 // Limite mensuelle par catégorie
