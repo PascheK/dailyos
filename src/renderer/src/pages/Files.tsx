@@ -245,7 +245,7 @@ export function Files(): React.JSX.Element {
   const newFolderInputRef = useRef<HTMLInputElement>(null)
 
   const {
-    files, folders,
+    files, folders, totalCount,
     loadFiles, loadFolders,
     pickAndAdd, openFile, revealFile, moveFile, deleteFile,
     createFolder, deleteFolder
@@ -322,7 +322,7 @@ export function Files(): React.JSX.Element {
         >
           <Folder className="w-4 h-4" />
           <span className="flex-1 text-left">Tous les fichiers</span>
-          <span className="text-xs opacity-60">{files.length}</span>
+          <span className="text-xs opacity-60">{totalCount}</span>
         </button>
 
         {/* Dossiers créés */}
