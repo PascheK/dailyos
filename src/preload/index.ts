@@ -22,10 +22,12 @@ const api = {
     renameNote:   (id: number, newName: string)          => ipcRenderer.invoke('files:renameNote', { id, newName })
   },
   folders: {
-    list: () => ipcRenderer.invoke('folders:list'),
-    create: (name: string) => ipcRenderer.invoke('folders:create', name),
-    delete: (id: number) => ipcRenderer.invoke('folders:delete', id),
-    rename: (id: number, name: string) => ipcRenderer.invoke('folders:rename', { id, name })
+    list:     ()                                         => ipcRenderer.invoke('folders:list'),
+    create:   (name: string, color?: string)             => ipcRenderer.invoke('folders:create', { name, color }),
+    delete:   (id: number)                               => ipcRenderer.invoke('folders:delete', id),
+    rename:   (id: number, name: string)                 => ipcRenderer.invoke('folders:rename', { id, name }),
+    setColor: (id: number, color: string | null)         => ipcRenderer.invoke('folders:setColor', { id, color }),
+    reorder:  (ids: number[])                            => ipcRenderer.invoke('folders:reorder', ids),
   },
   whiteboard: {
     list:   ()                                        => ipcRenderer.invoke('whiteboard:list'),

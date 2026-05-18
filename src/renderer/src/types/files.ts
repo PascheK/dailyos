@@ -12,5 +12,7 @@ export type AppFile = {
 export type AppFolder = {
   id: number
   name: string
+  color: string | null
+  sort_order: number
   created_at: string
 }

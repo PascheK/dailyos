@@ -94,22 +94,46 @@ export function registerFilesHandlers(): void {
   // ── Dossiers ──────────────────────────────────────────────────────────────
 
   ipcMain.handle('folders:list', () => {
-    return db.prepare('SELECT * FROM folders ORDER BY name ASC').all()
+    return db.prepare('SELECT * FROM folders ORDER BY sort_order ASC, name ASC').all()
   })
 
-  ipcMain.handle('folders:create', (_, name: string) => {
-    const result = db.prepare('INSERT INTO folders (name) VALUES (?)').run(name.trim())
-    return { id: Number(result.lastInsertRowid), name: name.trim() }
+  ipcMain.handle('folders:create', (_, payload: string | { name: string; color?: string }) => {
+    const name  = typeof payload === 'string' ? payload : payload.name
+    const color = typeof payload === 'string' ? null    : (payload.color ?? null)
+    const maxRow = db.prepare('SELECT COALESCE(MAX(sort_order), -1) AS m FROM folders').get() as { m: number }
+    const sortOrder = maxRow.m + 1
+    const result = db.prepare(
+      'INSERT INTO folders (name, color, sort_order) VALUES (?, ?, ?)'
+    ).run(name.trim(), color, sortOrder)
+    return {
+      id: Number(result.lastInsertRowid),
+      name: name.trim(),
+      color: color ?? null,
+      sort_order: sortOrder,
+      created_at: new Date().toISOString()
+    }
   })
 
   ipcMain.handle('folders:delete', (_, id: number) => {
-    // Les fichiers du dossier supprimé passent à folder_id = NULL (ON DELETE SET NULL)
     db.prepare('DELETE FROM folders WHERE id = ?').run(id)
     return true
   })
 
   ipcMain.handle('folders:rename', (_, { id, name }: { id: number; name: string }) => {
     db.prepare('UPDATE folders SET name = ? WHERE id = ?').run(name.trim(), id)
+    return true
+  })
+
+  ipcMain.handle('folders:setColor', (_, { id, color }: { id: number; color: string | null }) => {
+    db.prepare('UPDATE folders SET color = ? WHERE id = ?').run(color, id)
+    return true
+  })
+
+  ipcMain.handle('folders:reorder', (_, ids: number[]) => {
+    const stmt = db.prepare('UPDATE folders SET sort_order = ? WHERE id = ?')
+    db.transaction(() => {
+      ids.forEach((id, idx) => stmt.run(idx, id))
+    })()
     return true
   })
 

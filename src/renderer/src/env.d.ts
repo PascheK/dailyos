@@ -82,10 +82,12 @@ declare global {
         renameNote:   (id: number, newName: string)              => Promise<{ name: string; path: string } | false>
       }
       folders: {
-        list:   ()                                => Promise<AppFolder[]>
-        create: (name: string)                    => Promise<AppFolder>
-        delete: (id: number)                      => Promise<boolean>
-        rename: (id: number, name: string)        => Promise<boolean>
+        list:     ()                                        => Promise<AppFolder[]>
+        create:   (name: string, color?: string)            => Promise<AppFolder>
+        delete:   (id: number)                              => Promise<boolean>
+        rename:   (id: number, name: string)                => Promise<boolean>
+        setColor: (id: number, color: string | null)        => Promise<boolean>
+        reorder:  (ids: number[])                           => Promise<boolean>
       }
       ai: {
         chat:    (payload: { message: string; reasoningMode: string; profile: object | null; conversationId: number }) => Promise<null>

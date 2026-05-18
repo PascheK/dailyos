@@ -329,4 +329,13 @@ if (version < 7) {
   console.log('[DB] Migration v7 terminée.')
 }
 
+if (version < 8) {
+  // Migration v7 → v8 : couleur et ordre de tri sur les dossiers
+  console.log('[DB] Migration v8 : couleur et ordre des dossiers...')
+  db.exec(`ALTER TABLE folders ADD COLUMN color TEXT DEFAULT NULL`)
+  db.exec(`ALTER TABLE folders ADD COLUMN sort_order INTEGER DEFAULT 0`)
+  db.pragma('user_version = 8')
+  console.log('[DB] Migration v8 terminée.')
+}
+
 console.log('[DB] Initialisée :', DB_PATH)
