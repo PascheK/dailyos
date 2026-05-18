@@ -168,9 +168,13 @@ declare global {
         onWizardDone:       (cb: (data: { budgetId: number }) => void) => () => void
       }
       updater: {
-        checkNow: () => Promise<{ ok?: boolean; error?: boolean; skipped?: boolean }>
-        onUpdateAvailable: (cb: (info: { version: string }) => void) => () => void
+        checkNow:  () => Promise<{ ok?: boolean; error?: boolean; skipped?: boolean }>
+        download:  (version: string) => Promise<{ ok?: boolean; error?: boolean }>
+        onUpdateAvailable:    (cb: (info: { version: string }) => void) => () => void
         onUpdateNotAvailable: (cb: () => void) => () => void
+        onDownloadProgress:   (cb: (data: { progress: number; received: number; total: number }) => void) => () => void
+        onDownloadDone:       (cb: (data: { filePath: string }) => void) => () => void
+        onDownloadError:      (cb: (msg: string) => void) => () => void
       }
       shell: {
         openExternal: (url: string) => Promise<void>

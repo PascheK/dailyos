@@ -195,6 +195,58 @@ app.whenReady().then(() => {
     }
   })
 
+  // Handler : téléchargement de l'installeur sans certificat (sideload)
+  ipcMain.handle('updater:download', (_event, version: string) => {
+    const win = BrowserWindow.getAllWindows()[0]
+    if (!win) return { error: true }
+
+    // Construction du nom de fichier selon plateforme + arch
+    const plat = process.platform
+    const arch = process.arch
+    let filename: string
+    if (plat === 'darwin') {
+      filename = `DailyOS-${version}-${arch === 'arm64' ? 'arm64' : 'x64'}.dmg`
+    } else if (plat === 'win32') {
+      filename = `DailyOS-${version}-setup.exe`
+    } else {
+      filename = `DailyOS-${version}-${arch === 'arm64' ? 'arm64' : 'x64'}.AppImage`
+    }
+
+    const url      = `https://github.com/PascheK/dailyos/releases/download/v${version}/${filename}`
+    const savePath = join(app.getPath('downloads'), filename)
+
+    // Écoute le prochain téléchargement déclenché sur cette session
+    win.webContents.session.once('will-download', (_e, item) => {
+      item.setSavePath(savePath)
+
+      item.on('updated', (_e2, state) => {
+        if (state === 'progressing') {
+          const received = item.getReceivedBytes()
+          const total    = item.getTotalBytes()
+          win.webContents.send('updater:download:progress', {
+            progress: total > 0 ? Math.round((received / total) * 100) : -1,
+            received,
+            total
+          })
+        }
+      })
+
+      item.once('done', (_e2, state) => {
+        if (state === 'completed') {
+          win.webContents.send('updater:download:done', { filePath: savePath })
+          // Ouvre directement le fichier (Finder / Explorateur / gestionnaire de paquets)
+          void shell.openPath(savePath)
+        } else {
+          win.webContents.send('updater:download:error', `Téléchargement échoué (${state})`)
+        }
+      })
+    })
+
+    // Déclenche le téléchargement
+    win.webContents.session.downloadURL(url)
+    return { ok: true }
+  })
+
 
   app.on('activate', function () {
     // On macOS it's common to re-create a window in the app when the

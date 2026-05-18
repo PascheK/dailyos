@@ -90,6 +90,7 @@ const api = {
   },
   updater: {
     checkNow: () => ipcRenderer.invoke('updater:check'),
+    download:  (version: string) => ipcRenderer.invoke('updater:download', version),
     onUpdateAvailable: (cb: (info: { version: string }) => void) => {
       const handler = (_: unknown, info: { version: string }): void => cb(info)
       ipcRenderer.on('update:available', handler)
@@ -99,7 +100,22 @@ const api = {
       const handler = (): void => cb()
       ipcRenderer.on('update:not-available', handler)
       return () => ipcRenderer.removeListener('update:not-available', handler)
-    }
+    },
+    onDownloadProgress: (cb: (data: { progress: number; received: number; total: number }) => void) => {
+      const h = (_: unknown, data: { progress: number; received: number; total: number }): void => cb(data)
+      ipcRenderer.on('updater:download:progress', h)
+      return () => ipcRenderer.removeListener('updater:download:progress', h)
+    },
+    onDownloadDone: (cb: (data: { filePath: string }) => void) => {
+      const h = (_: unknown, data: { filePath: string }): void => cb(data)
+      ipcRenderer.on('updater:download:done', h)
+      return () => ipcRenderer.removeListener('updater:download:done', h)
+    },
+    onDownloadError: (cb: (msg: string) => void) => {
+      const h = (_: unknown, msg: string): void => cb(msg)
+      ipcRenderer.on('updater:download:error', h)
+      return () => ipcRenderer.removeListener('updater:download:error', h)
+    },
   },
   budget: {
     list:            ()                             => ipcRenderer.invoke('budget:list'),

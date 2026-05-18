@@ -20,6 +20,8 @@ import {
   ExternalLink,
   Shield,
   AlertCircle,
+  AlertTriangle,
+  CheckCircle,
   Wallet
 } from 'lucide-react'
 import {
@@ -1212,7 +1214,8 @@ function DataSection(): React.JSX.Element {
   )
 }
 
-type UpdateStatus = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error'
+type UpdateStatus   = 'idle' | 'checking' | 'available' | 'up-to-date' | 'error'
+type DownloadStatus = 'idle' | 'downloading' | 'done' | 'error'
 
 function AboutSection(): React.JSX.Element {
   const [info, setInfo] = useState<{
@@ -1222,23 +1225,29 @@ function AboutSection(): React.JSX.Element {
     electron: string
     node: string
   } | null>(null)
-  const [autoUpdate, setAutoUpdate] = useState(
-    localStorage.getItem('dailyos:auto-update') !== 'false'
-  )
-  const [updateStatus, setUpdateStatus] = useState<UpdateStatus>('idle')
+  const [autoUpdate,      setAutoUpdate]      = useState(localStorage.getItem('dailyos:auto-update') !== 'false')
+  const [updateStatus,    setUpdateStatus]    = useState<UpdateStatus>('idle')
   const [availableVersion, setAvailableVersion] = useState<string | null>(null)
+  const [dlStatus,        setDlStatus]        = useState<DownloadStatus>('idle')
+  const [dlProgress,      setDlProgress]      = useState(0)
+  const [dlTotal,         setDlTotal]         = useState(0)
 
   useEffect(() => {
     window.api.settings.appInfo().then(setInfo)
 
-    const unsubAvail = window.api.updater.onUpdateAvailable((info) => {
-      setAvailableVersion(info.version)
+    const unsubAvail = window.api.updater.onUpdateAvailable((i) => {
+      setAvailableVersion(i.version)
       setUpdateStatus('available')
     })
-    const unsubNot = window.api.updater.onUpdateNotAvailable(() => {
-      setUpdateStatus('up-to-date')
+    const unsubNot  = window.api.updater.onUpdateNotAvailable(() => setUpdateStatus('up-to-date'))
+    const unsubProg = window.api.updater.onDownloadProgress(({ progress, total }) => {
+      setDlProgress(progress)
+      setDlTotal(total)
     })
-    return () => { unsubAvail(); unsubNot() }
+    const unsubDone = window.api.updater.onDownloadDone(() => setDlStatus('done'))
+    const unsubErr  = window.api.updater.onDownloadError(() => setDlStatus('error'))
+
+    return () => { unsubAvail(); unsubNot(); unsubProg(); unsubDone(); unsubErr() }
   }, [])
 
   const handleAutoUpdateToggle = (v: boolean): void => {
@@ -1249,18 +1258,29 @@ function AboutSection(): React.JSX.Element {
   const handleCheckNow = async (): Promise<void> => {
     setUpdateStatus('checking')
     setAvailableVersion(null)
+    setDlStatus('idle')
+    setDlProgress(0)
     const result = await window.api.updater.checkNow()
     if (result.skipped) setUpdateStatus('idle')
     else if (result.error) setUpdateStatus('error')
-    // 'available' ou 'up-to-date' sera mis à jour via les events IPC
   }
 
+  const handleDownload = async (): Promise<void> => {
+    if (!availableVersion) return
+    setDlStatus('downloading')
+    setDlProgress(0)
+    await window.api.updater.download(availableVersion)
+  }
+
+  // Formatte les octets en MB
+  const fmtMb = (bytes: number): string => bytes > 0 ? `${(bytes / 1024 / 1024).toFixed(1)} Mo` : ''
+
   const statusLabel: Record<UpdateStatus, { text: string; cls: string } | null> = {
-    idle:       null,
-    checking:   { text: 'Vérification…',            cls: 'text-slate-400' },
-    'up-to-date': { text: 'L\'app est à jour ✓',   cls: 'text-green-400' },
-    available:  { text: `Mise à jour disponible — v${availableVersion}`, cls: 'text-[var(--color-primary)]' },
-    error:      { text: 'Impossible de vérifier',   cls: 'text-red-400' },
+    idle:         null,
+    checking:     { text: 'Vérification…',           cls: 'text-slate-400' },
+    'up-to-date': { text: "L'app est à jour ✓",      cls: 'text-green-400' },
+    available:    { text: `v${availableVersion} disponible`, cls: 'text-[var(--color-primary)]' },
+    error:        { text: 'Impossible de vérifier',  cls: 'text-red-400' },
   }
 
   return (
@@ -1289,16 +1309,17 @@ function AboutSection(): React.JSX.Element {
           <Toggle value={autoUpdate} onChange={handleAutoUpdateToggle} />
         </SettingRow>
 
+        {/* Ligne check + statut */}
         <div className="flex items-center gap-3 pt-1">
           <button
             onClick={() => void handleCheckNow()}
-            disabled={updateStatus === 'checking'}
+            disabled={updateStatus === 'checking' || dlStatus === 'downloading'}
             className="flex items-center gap-2 px-4 py-2 bg-slate-700 hover:bg-slate-600 disabled:opacity-50 border border-slate-600 rounded-xl text-sm text-slate-200 transition-colors"
           >
             {updateStatus === 'checking'
               ? <Loader2 className="w-4 h-4 animate-spin" />
-              : <Download className="w-4 h-4" />}
-            Vérifier maintenant
+              : <RotateCcw className="w-4 h-4" />}
+            Vérifier
           </button>
 
           {statusLabel[updateStatus] && (
@@ -1307,15 +1328,64 @@ function AboutSection(): React.JSX.Element {
             </span>
           )}
 
-          {updateStatus === 'available' && (
+          {/* Bouton télécharger (dispo quand update détectée et pas déjà en cours) */}
+          {updateStatus === 'available' && dlStatus === 'idle' && (
             <button
-              onClick={() => void window.api.shell.openExternal('https://github.com/PascheK/dailyos/releases/latest')}
+              onClick={() => void handleDownload()}
               className="ml-auto flex items-center gap-1.5 px-3 py-1.5 bg-[var(--color-primary)] hover:opacity-90 rounded-xl text-white text-xs font-medium transition-all"
             >
-              <Download className="w-3.5 h-3.5" /> Télécharger
+              <Download className="w-3.5 h-3.5" /> Télécharger v{availableVersion}
             </button>
           )}
         </div>
+
+        {/* Barre de progression du téléchargement */}
+        {dlStatus === 'downloading' && (
+          <div className="flex flex-col gap-1.5 pt-1">
+            <div className="flex items-center justify-between text-xs text-slate-500">
+              <span className="flex items-center gap-1.5">
+                <Loader2 className="w-3.5 h-3.5 animate-spin" />
+                Téléchargement en cours…
+              </span>
+              <span>
+                {dlProgress >= 0 ? `${dlProgress}%` : '—'}
+                {dlTotal > 0 && <span className="text-slate-600 ml-1">({fmtMb(dlTotal)})</span>}
+              </span>
+            </div>
+            <div className="h-1.5 bg-slate-700 rounded-full overflow-hidden">
+              <div
+                className={`h-full rounded-full bg-[var(--color-primary)] transition-all ${dlProgress < 0 ? 'animate-pulse w-1/3' : ''}`}
+                style={dlProgress >= 0 ? { width: `${dlProgress}%` } : undefined}
+              />
+            </div>
+          </div>
+        )}
+
+        {/* Succès */}
+        {dlStatus === 'done' && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-emerald-500/10 border border-emerald-500/20 rounded-xl">
+            <CheckCircle className="w-4 h-4 text-emerald-400 shrink-0" />
+            <p className="text-xs text-emerald-300">
+              Téléchargement terminé — l'installeur s'est ouvert automatiquement.
+            </p>
+          </div>
+        )}
+
+        {/* Erreur téléchargement */}
+        {dlStatus === 'error' && (
+          <div className="flex items-center gap-2 px-3 py-2 bg-red-500/10 border border-red-500/20 rounded-xl">
+            <AlertTriangle className="w-4 h-4 text-red-400 shrink-0" />
+            <p className="text-xs text-red-300">
+              Échec du téléchargement.{' '}
+              <button
+                onClick={() => void window.api.shell.openExternal(`https://github.com/PascheK/dailyos/releases/latest`)}
+                className="underline hover:text-red-200"
+              >
+                Télécharger manuellement
+              </button>
+            </p>
+          </div>
+        )}
       </div>
 
       {/* ── Infos système ─────────────────────────────────────── */}
