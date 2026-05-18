@@ -8,19 +8,18 @@ import { getSettings, getApiKey } from '../store'
 type DbBudget = {
   id: number; name: string; total_amount: number; currency: string
   display_currency: string | null; display_rate: number | null
-  display_rate_updated_at: string | null; start_date: string; end_date: string; created_at: string
+  display_rate_updated_at: string | null; start_date: string; end_date: string
+  created_at: string; savings_goal: number; checkup_day: number; last_checkup_month: string | null
 }
 type DbExtra    = { id: number; budget_id: number; label: string; amount: number; planned_date: string | null; created_at: string }
 type DbCategory = { id: number; budget_id: number | null; name: string; color: string; icon: string }
-type DbTx       = { id: number; budget_id: number; category_id: number | null; category_name: string | null
-                    category_color: string | null; label: string; amount: number; currency: string
-                    amount_base: number; date: string; is_revenue: number; is_recurring: number
-                    recurring_id: number | null; created_at: string }
 type DbRecurring = { id: number; budget_id: number; category_id: number | null; label: string
                      amount: number; currency: string; recurrence_type: string; recurrence_day: number
-                     active: number; last_applied: string | null }
+                     active: number; last_applied: string | null; is_revenue: number }
 type DbGoal      = { id: number; budget_id: number; period_start: string; period_end: string
                      monthly_target: number; critical_threshold: number; recalculated_at: string }
+type DbCategoryLimit = { id: number; budget_id: number; category_id: number; monthly_limit: number }
+type DbCheckup   = { id: number; budget_id: number; month: string; rollover_amount: number; acknowledged: number; created_at: string }
 
 // ── Utilitaires date ──────────────────────────────────────────────────────────
 
@@ -367,20 +366,161 @@ function streamPost(
   req.end()
 }
 
+// ── Checkup mensuel ───────────────────────────────────────────────────────────
+
+function runMonthlyCheckup(budgetId: number, month: string): DbCheckup | null {
+  const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get(budgetId) as DbBudget | undefined
+  if (!budget) return null
+
+  const { start: mStart, end: mEnd } = periodBounds(month)
+
+  // Calcul du rollover : somme des enveloppes non-atteintes
+  const envelopes = db.prepare(
+    'SELECT * FROM budget_category_limits WHERE budget_id = ?'
+  ).all(budgetId) as DbCategoryLimit[]
+
+  let rollover_amount = 0
+  for (const env of envelopes) {
+    const spent = db.prepare(
+      `SELECT COALESCE(SUM(amount_base), 0) as s
+       FROM budget_transactions
+       WHERE budget_id = ? AND category_id = ? AND date >= ? AND date <= ? AND is_revenue = 0`
+    ).get(budgetId, env.category_id, mStart, mEnd) as { s: number }
+    rollover_amount += Math.max(0, env.monthly_limit - spent.s)
+  }
+
+  // Insérer le checkup (IGNORE si déjà existant)
+  db.prepare(
+    `INSERT OR IGNORE INTO budget_monthly_checkups (budget_id, month, rollover_amount)
+     VALUES (?, ?, ?)`
+  ).run(budgetId, month, rollover_amount)
+
+  return db.prepare(
+    'SELECT * FROM budget_monthly_checkups WHERE budget_id = ? AND month = ?'
+  ).get(budgetId, month) as DbCheckup
+}
+
+function autoCheckupIfDue(budgetId: number): void {
+  const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get(budgetId) as DbBudget | undefined
+  if (!budget) return
+
+  const today    = new Date()
+  const todayISO = today.toISOString().slice(0, 10)
+  if (todayISO < budget.start_date || todayISO > budget.end_date) return
+
+  // Le jour du checkup = jour de démarrage du budget (ex: budget du 09.02 → checkup le 9)
+  const checkupDay = parseInt(budget.start_date.split('-')[2], 10)
+  if (today.getDate() < checkupDay) return
+
+  // Mois précédent
+  const prevMonth = new Date(today.getFullYear(), today.getMonth() - 1, 1)
+  const prevYM    = `${prevMonth.getFullYear()}-${String(prevMonth.getMonth() + 1).padStart(2, '0')}`
+
+  // Vérifier que le mois précédent est dans la période du budget
+  const { end: prevEnd } = periodBounds(prevYM)
+  if (prevEnd < budget.start_date) return
+
+  // Ne pas refaire si déjà fait
+  const existing = db.prepare(
+    'SELECT id FROM budget_monthly_checkups WHERE budget_id = ? AND month = ?'
+  ).get(budgetId, prevYM) as { id: number } | undefined
+  if (existing) return
+
+  runMonthlyCheckup(budgetId, prevYM)
+}
+
 // ── Construction du résumé ────────────────────────────────────────────────────
 
 function buildSummary(budgetId: number) {
   const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get(budgetId) as DbBudget | undefined
   if (!budget) return null
 
+  // ── Extras (dépenses fixes uniques) ──────────────────────────────────────
   const extra_items = db.prepare(
     'SELECT * FROM budget_extra_items WHERE budget_id = ? ORDER BY planned_date'
   ).all(budgetId) as DbExtra[]
-  const extra_total = extra_items.reduce((a, e) => a + e.amount, 0)
-  const available_amount = budget.total_amount - extra_total
+  const extra_total     = extra_items.reduce((a, e) => a + e.amount, 0)
+  const available_amount = budget.total_amount - extra_total   // compat ancienne logique
+
+  const total_months    = monthsBetween(budget.start_date, budget.end_date)
+  const months_elapsed  = monthsElapsed(budget.start_date)
+  const months_remaining = Math.max(0, total_months - months_elapsed)
 
   const { start, end } = periodBounds(currentYearMonth())
 
+  // ── Récurrents : abonnements (is_revenue=0) + sources de revenus (is_revenue=1) ──
+  const recurringRows = db.prepare(
+    `SELECT r.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+     FROM budget_recurring r
+     LEFT JOIN budget_categories c ON r.category_id = c.id
+     WHERE r.budget_id = ? AND r.active = 1`
+  ).all(budgetId) as (DbRecurring & { category_name: string | null; category_color: string | null; category_icon: string | null })[]
+
+  const allRecurring = recurringRows.map((r) => {
+    let amount_base_monthly = r.amount
+    if (r.currency !== budget.currency && budget.display_rate) {
+      amount_base_monthly = r.amount / budget.display_rate
+    }
+    return { ...r, amount_base_monthly }
+  })
+
+  const expense_recurring_items = allRecurring.filter((r) => !r.is_revenue)
+  const revenue_items           = allRecurring.filter((r) => !!r.is_revenue)
+  const expense_recurring_monthly = expense_recurring_items.reduce((a, r) => a + r.amount_base_monthly, 0)
+  const revenue_monthly_total     = revenue_items.reduce((a, r) => a + r.amount_base_monthly, 0)
+
+  // ── Enveloppes (budget_category_limits) ──────────────────────────────────
+  const envelopeRows = db.prepare(
+    `SELECT cl.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+     FROM budget_category_limits cl
+     JOIN budget_categories c ON cl.category_id = c.id
+     WHERE cl.budget_id = ?`
+  ).all(budgetId) as (DbCategoryLimit & { category_name: string; category_color: string; category_icon: string })[]
+
+  const envelope_items = envelopeRows.map((env) => {
+    const spent = db.prepare(
+      `SELECT COALESCE(SUM(amount_base), 0) as s
+       FROM budget_transactions
+       WHERE budget_id = ? AND category_id = ? AND date >= ? AND date <= ? AND is_revenue = 0`
+    ).get(budgetId, env.category_id, start, end) as { s: number }
+    return { ...env, current_month_spent: spent.s }
+  })
+  const envelope_monthly_total = envelope_items.reduce((a, e) => a + e.monthly_limit, 0)
+
+  // ── Calculs budget ────────────────────────────────────────────────────────
+  // Budget total réel = lump sum + revenus récurrents sur toute la durée
+  const total_budget_available = budget.total_amount + revenue_monthly_total * total_months
+
+  // Montant planifié = fixes + abonnements × mois + enveloppes × mois
+  const planned_total = extra_total
+    + expense_recurring_monthly * total_months
+    + envelope_monthly_total    * total_months
+
+  const marge_libre  = total_budget_available - planned_total
+  const savings_goal = budget.savings_goal ?? 0
+  const reserve      = marge_libre * savings_goal / 100
+  const budget_libre = marge_libre * (1 - savings_goal / 100)
+  const budget_libre_monthly = total_months > 0 ? budget_libre / total_months : 0
+
+  // ── Cagnotte cumulative (budget libre accumulé sur les mois écoulés) ─────
+  let cumulative_budget_libre = 0
+  for (let m = 0; m < months_elapsed; m++) {
+    const md = new Date(budget.start_date)
+    md.setMonth(md.getMonth() + m)
+    const ym = `${md.getFullYear()}-${String(md.getMonth() + 1).padStart(2, '0')}`
+    const { start: ms, end: me } = periodBounds(ym)
+    cumulative_budget_libre += budget_libre_monthly
+    for (const env of envelopeRows) {
+      const sp = db.prepare(
+        `SELECT COALESCE(SUM(amount_base), 0) as s
+         FROM budget_transactions
+         WHERE budget_id = ? AND category_id = ? AND date >= ? AND date <= ? AND is_revenue = 0`
+      ).get(budgetId, env.category_id, ms, me) as { s: number }
+      cumulative_budget_libre += Math.max(0, env.monthly_limit - sp.s)
+    }
+  }
+
+  // ── Agrégats transactions (compat ancienne logique) ───────────────────────
   const agg = db.prepare(
     `SELECT
       COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
@@ -397,48 +537,41 @@ function buildSummary(budgetId: number) {
 
   const net_spent       = agg.spent - agg.revenue
   const total_remaining = available_amount - net_spent
-  const total_months    = monthsBetween(budget.start_date, budget.end_date)
-  const months_elapsed  = monthsElapsed(budget.start_date)
-  const months_remaining = Math.max(0, total_months - months_elapsed)
 
   const goal = db.prepare(
     'SELECT * FROM budget_ai_goals WHERE budget_id = ? ORDER BY recalculated_at DESC LIMIT 1'
   ).get(budgetId) as DbGoal | undefined
 
-  const display_remaining = (budget.display_currency && budget.display_rate)
-    ? total_remaining * budget.display_rate : null
-  const display_period_spent = (budget.display_currency && budget.display_rate)
-    ? (periodAgg.spent - periodAgg.revenue) * budget.display_rate : null
+  const display_remaining    = (budget.display_currency && budget.display_rate) ? total_remaining * budget.display_rate : null
+  const display_period_spent = (budget.display_currency && budget.display_rate) ? (periodAgg.spent - periodAgg.revenue) * budget.display_rate : null
 
-  // Cagnotte : montant économisé vs objectif mensuel cumulé
-  const monthly_goal = goal?.monthly_target ?? (months_remaining > 0 ? available_amount / total_months : 0)
+  const monthly_goal           = goal?.monthly_target ?? (months_remaining > 0 ? available_amount / total_months : 0)
   const expected_spent_to_date = monthly_goal * months_elapsed
-  const savings = Math.max(0, expected_spent_to_date - net_spent)
-  const display_savings = (budget.display_currency && budget.display_rate && savings > 0)
-    ? savings * budget.display_rate : null
+  const savings                = Math.max(0, expected_spent_to_date - net_spent)
+  const display_savings        = (budget.display_currency && budget.display_rate && savings > 0) ? savings * budget.display_rate : null
 
-  // Dépenses du jour courant
-  const todayISO = new Date().toISOString().slice(0, 10)
-  const dayAgg = db.prepare(
-    `SELECT
-      COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
-      COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
+  const todayISO  = new Date().toISOString().slice(0, 10)
+  const dayAgg    = db.prepare(
+    `SELECT COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
+            COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
      FROM budget_transactions WHERE budget_id = ? AND date = ?`
   ).get(budgetId, todayISO) as { spent: number; revenue: number }
   const day_spent = dayAgg.spent - dayAgg.revenue
 
-  // Dépenses de la semaine courante (lundi → aujourd'hui)
-  const dayOfWeek = (new Date().getDay() + 6) % 7  // 0=lundi … 6=dimanche
-  const weekStartDate = new Date()
-  weekStartDate.setDate(weekStartDate.getDate() - dayOfWeek)
-  const week_start = weekStartDate.toISOString().slice(0, 10)
-  const weekAgg = db.prepare(
-    `SELECT
-      COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
-      COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
+  const dayOfWeek   = (new Date().getDay() + 6) % 7
+  const weekStartDt = new Date(); weekStartDt.setDate(weekStartDt.getDate() - dayOfWeek)
+  const week_start  = weekStartDt.toISOString().slice(0, 10)
+  const weekAgg     = db.prepare(
+    `SELECT COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
+            COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
      FROM budget_transactions WHERE budget_id = ? AND date >= ? AND date <= ?`
   ).get(budgetId, week_start, todayISO) as { spent: number; revenue: number }
   const week_spent = weekAgg.spent - weekAgg.revenue
+
+  // ── Checkup en attente ────────────────────────────────────────────────────
+  const pending_checkup = db.prepare(
+    'SELECT * FROM budget_monthly_checkups WHERE budget_id = ? AND acknowledged = 0 ORDER BY month DESC LIMIT 1'
+  ).get(budgetId) as DbCheckup | null
 
   return {
     budget, extra_items, extra_total, available_amount,
@@ -448,7 +581,17 @@ function buildSummary(budgetId: number) {
     current_period_spent: periodAgg.spent, current_period_revenue: periodAgg.revenue,
     goal: goal ?? null, display_remaining, display_period_spent,
     savings, display_savings, monthly_goal,
-    day_spent, week_spent, week_start
+    day_spent, week_spent, week_start,
+    // Nouveaux champs
+    expense_recurring_items, revenue_items, envelope_items,
+    expense_recurring_monthly, revenue_monthly_total, envelope_monthly_total,
+    total_budget_available, planned_total, marge_libre,
+    savings_goal, reserve, budget_libre, budget_libre_monthly,
+    cumulative_budget_libre,
+    pending_checkup: pending_checkup ?? null,
+    // Compat (certains endroits utilisaient encore ces champs)
+    recurring_items: expense_recurring_items,
+    recurring_monthly_total: expense_recurring_monthly,
   }
 }
 
@@ -491,6 +634,7 @@ export function registerBudgetHandlers(): void {
   ipcMain.handle('budget:update', async (_event, { id, ...payload }: {
     id: number; name?: string; total_amount?: number; currency?: string
     display_currency?: string | null; start_date?: string; end_date?: string
+    savings_goal?: number; checkup_day?: number
   }) => {
     const existing = db.prepare('SELECT * FROM budgets WHERE id = ?').get(id) as DbBudget
     if (!existing) return null
@@ -509,9 +653,11 @@ export function registerBudgetHandlers(): void {
 
     db.prepare(
       `UPDATE budgets SET name=?, total_amount=?, currency=?, display_currency=?,
-       display_rate=?, display_rate_updated_at=?, start_date=?, end_date=? WHERE id=?`
+       display_rate=?, display_rate_updated_at=?, start_date=?, end_date=?,
+       savings_goal=?, checkup_day=? WHERE id=?`
     ).run(updated.name, updated.total_amount, updated.currency, updated.display_currency,
-          updated.display_rate, updated.display_rate_updated_at, updated.start_date, updated.end_date, id)
+          updated.display_rate, updated.display_rate_updated_at, updated.start_date, updated.end_date,
+          updated.savings_goal ?? 0, updated.checkup_day ?? 6, id)
 
     upsertGoal(id)
     return db.prepare('SELECT * FROM budgets WHERE id = ?').get(id)
@@ -522,7 +668,72 @@ export function registerBudgetHandlers(): void {
     return true
   })
 
-  ipcMain.handle('budget:summary', (_event, id: number) => buildSummary(id))
+  ipcMain.handle('budget:summary', (_event, id: number) => {
+    autoCheckupIfDue(id)
+    return buildSummary(id)
+  })
+
+  ipcMain.handle('budget:checkup:detail', (_event, { budgetId, month }: { budgetId: number; month: string }) => {
+    const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get(budgetId) as DbBudget | undefined
+    if (!budget) return null
+    const checkup = db.prepare(
+      'SELECT * FROM budget_monthly_checkups WHERE budget_id = ? AND month = ?'
+    ).get(budgetId, month) as DbCheckup | undefined
+    if (!checkup) return null
+
+    const { start: mStart, end: mEnd } = periodBounds(month)
+
+    // Revenus reçus ce mois (transactions is_revenue=1)
+    const revRow = db.prepare(
+      `SELECT COALESCE(SUM(amount_base),0) as s FROM budget_transactions
+       WHERE budget_id = ? AND date >= ? AND date <= ? AND is_revenue = 1`
+    ).get(budgetId, mStart, mEnd) as { s: number }
+
+    // Abonnements payés ce mois (transactions is_revenue=0)
+    const expRow = db.prepare(
+      `SELECT COALESCE(SUM(amount_base),0) as s FROM budget_transactions
+       WHERE budget_id = ? AND date >= ? AND date <= ? AND is_revenue = 0`
+    ).get(budgetId, mStart, mEnd) as { s: number }
+
+    // Détail par enveloppe
+    const envelopes = db.prepare(
+      `SELECT cl.*, c.name as category_name, c.color as category_color, c.icon as category_icon
+       FROM budget_category_limits cl JOIN budget_categories c ON cl.category_id = c.id
+       WHERE cl.budget_id = ?`
+    ).all(budgetId) as (DbCategoryLimit & { category_name: string; category_color: string; category_icon: string })[]
+
+    const envelope_details = envelopes.map((env) => {
+      const sp = db.prepare(
+        `SELECT COALESCE(SUM(amount_base),0) as s FROM budget_transactions
+         WHERE budget_id = ? AND category_id = ? AND date >= ? AND date <= ? AND is_revenue = 0`
+      ).get(budgetId, env.category_id, mStart, mEnd) as { s: number }
+      return {
+        category_name:  env.category_name,
+        category_icon:  env.category_icon,
+        category_color: env.category_color,
+        budget:  env.monthly_limit,
+        spent:   sp.s,
+        rollover: Math.max(0, env.monthly_limit - sp.s),
+      }
+    })
+
+    const monthLabel = new Date(`${month}-01`).toLocaleDateString('fr-FR', { month: 'long', year: 'numeric' })
+
+    return {
+      checkup,
+      month_label:         monthLabel,
+      revenue_received:    revRow.s,
+      expenses_paid:       expRow.s,
+      envelope_details,
+      total_rollover:      checkup.rollover_amount,
+      budget_libre_this_month: 0,  // calculé côté frontend si besoin
+    }
+  })
+
+  ipcMain.handle('budget:checkup:acknowledge', (_event, id: number) => {
+    db.prepare('UPDATE budget_monthly_checkups SET acknowledged = 1 WHERE id = ?').run(id)
+    return true
+  })
 
   ipcMain.handle('budget:widgetData', () => {
     const budget = db.prepare('SELECT * FROM budgets ORDER BY created_at DESC LIMIT 1').get() as DbBudget | undefined
@@ -699,14 +910,71 @@ export function registerBudgetHandlers(): void {
   ipcMain.handle('budget:recurring:create', (_event, payload: {
     budget_id: number; category_id: number | null; label: string
     amount: number; currency: string; recurrence_type: string; recurrence_day: number
+    is_revenue?: boolean
   }) => {
+    const isRevenue = payload.is_revenue ? 1 : 0
     const info = db.prepare(
       `INSERT INTO budget_recurring
-       (budget_id, category_id, label, amount, currency, recurrence_type, recurrence_day)
-       VALUES (?, ?, ?, ?, ?, ?, ?)`
+       (budget_id, category_id, label, amount, currency, recurrence_type, recurrence_day, is_revenue)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?)`
     ).run(payload.budget_id, payload.category_id, payload.label,
-          payload.amount, payload.currency, payload.recurrence_type, payload.recurrence_day)
+          payload.amount, payload.currency, payload.recurrence_type, payload.recurrence_day, isRevenue)
     return db.prepare('SELECT * FROM budget_recurring WHERE id = ?').get(info.lastInsertRowid)
+  })
+
+  // ── Données mensuelles pour le graphique ────────────────────────────────────
+
+  ipcMain.handle('budget:monthlyData', (_event, budgetId: number) => {
+    const budget = db.prepare('SELECT * FROM budgets WHERE id = ?').get(budgetId) as DbBudget | undefined
+    if (!budget) return []
+
+    const totalMonths = monthsBetween(budget.start_date, budget.end_date)
+
+    // Abonnements actifs (dépenses uniquement)
+    const expRec = db.prepare(
+      'SELECT * FROM budget_recurring WHERE budget_id = ? AND active = 1 AND is_revenue = 0'
+    ).all(budgetId) as DbRecurring[]
+    const expRecMonthly = expRec.reduce((a, r) => {
+      let amt = r.amount
+      if (r.currency !== budget.currency && budget.display_rate) amt = r.amount / budget.display_rate
+      return a + amt
+    }, 0)
+
+    // Enveloppes
+    const envRow = db.prepare(
+      'SELECT COALESCE(SUM(monthly_limit), 0) as s FROM budget_category_limits WHERE budget_id = ?'
+    ).get(budgetId) as { s: number }
+    const plannedMonthly = expRecMonthly + envRow.s
+
+    const todayISO = new Date().toISOString().slice(0, 10)
+
+    const results = []
+    for (let m = 0; m < totalMonths; m++) {
+      const md = new Date(budget.start_date)
+      md.setMonth(md.getMonth() + m)
+      const ym     = `${md.getFullYear()}-${String(md.getMonth() + 1).padStart(2, '0')}`
+      const { start: ms, end: me } = periodBounds(ym)
+
+      const agg = db.prepare(
+        `SELECT
+          COALESCE(SUM(CASE WHEN is_revenue=0 THEN amount_base ELSE 0 END),0) as spent,
+          COALESCE(SUM(CASE WHEN is_revenue=1 THEN amount_base ELSE 0 END),0) as revenue
+         FROM budget_transactions WHERE budget_id = ? AND date >= ? AND date <= ?`
+      ).get(budgetId, ms, me) as { spent: number; revenue: number }
+
+      const label = new Date(`${ym}-15`).toLocaleDateString('fr-FR', { month: 'short' })
+        .replace('.', '').slice(0, 4)
+
+      results.push({
+        month:            ym,
+        month_label:      label.charAt(0).toUpperCase() + label.slice(1),
+        planned:          plannedMonthly,
+        actual:           agg.spent,
+        revenue_received: agg.revenue,
+        is_future:        ms > todayISO,
+      })
+    }
+    return results
   })
 
   ipcMain.handle('budget:recurring:toggle', (_event, id: number) => {

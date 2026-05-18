@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
+import { createPortal } from 'react-dom'
 import { useParams, useNavigate } from 'react-router-dom'
 import {
   ArrowLeft,
@@ -21,8 +22,6 @@ import {
   PiggyBank,
   Check,
   ChevronDown,
-  Wallet,
-  CalendarDays,
 } from 'lucide-react'
 import type {
   BudgetSummary,
@@ -30,6 +29,10 @@ import type {
   BudgetCategory,
   BudgetRecurring,
   BudgetExtraItem,
+  BudgetCheckup,
+  BudgetCheckupDetail,
+  BudgetMonthlyData,
+  BudgetEnvelopeItem,
   NewTransactionPayload,
   NewExtraPayload,
   NewRecurringPayload,
@@ -65,49 +68,6 @@ function pct(a: number, b: number): number {
 
 function todayStr(): string {
   return new Date().toISOString().slice(0, 10)
-}
-
-// ── Barre de progression ──────────────────────────────────────────────────────
-
-function ProgressBar({
-  value,
-  max,
-  warn,
-  danger,
-  label,
-  sublabel,
-  small = false
-}: {
-  value: number
-  max: number
-  warn?: number
-  danger?: number
-  label?: string
-  sublabel?: string
-  small?: boolean
-}): React.JSX.Element {
-  const p = pct(value, max)
-  const isDanger = danger !== undefined && value >= danger
-  const isWarn = warn !== undefined && value >= warn && !isDanger
-  const color = isDanger ? 'bg-red-500' : isWarn ? 'bg-amber-500' : 'bg-[var(--color-primary)]'
-  const text = isDanger ? 'text-red-400' : isWarn ? 'text-amber-400' : 'text-[var(--color-primary)]'
-
-  return (
-    <div className="flex flex-col gap-1">
-      {(label || sublabel) && (
-        <div className="flex items-center justify-between text-xs">
-          {label && <span className="text-slate-400">{label}</span>}
-          {sublabel && <span className={`font-medium ${text}`}>{sublabel}</span>}
-        </div>
-      )}
-      <div className={`${small ? 'h-1.5' : 'h-2'} bg-slate-800 rounded-full overflow-hidden`}>
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${color}`}
-          style={{ width: `${p}%` }}
-        />
-      </div>
-    </div>
-  )
 }
 
 // ── Tab: Vue d'ensemble ───────────────────────────────────────────────────────
@@ -302,170 +262,434 @@ function Collapsible({
   )
 }
 
-// ── Vue par période ───────────────────────────────────────────────────────────
+// ── Vue d'ensemble — helpers période ─────────────────────────────────────────
 
 type PeriodKey = 'total' | 'mois' | 'semaine' | 'jour'
 
-function PeriodView({
-  summary,
-  cur,
-  dispCur,
-  rate
+const PERIOD_LABELS: Record<PeriodKey, string> = {
+  total: 'Total', mois: 'Mois', semaine: 'Semaine', jour: 'Jour'
+}
+
+function divByPeriod(key: PeriodKey, months: number): number {
+  if (key === 'total')   return 1
+  if (key === 'mois')    return months
+  if (key === 'semaine') return months * 4.333
+  return months * 30.44
+}
+
+/** Montant d'un extra (one-shot) ramené à la période choisie */
+function extraForPeriod(amount: number, key: PeriodKey, months: number): number {
+  return amount / divByPeriod(key, months)
+}
+
+/** Montant d'un récurrent (mensuel) ramené à la période choisie */
+function recurringForPeriod(monthly: number, key: PeriodKey, months: number): number {
+  if (key === 'total')   return monthly * months
+  if (key === 'mois')    return monthly
+  if (key === 'semaine') return monthly / 4.333
+  return monthly / 30.44
+}
+
+// ── KpiCard ───────────────────────────────────────────────────────────────────
+
+function KpiCard({
+  label, amount, currency, dispAmount, dispCurrency, highlight = false, negative = false
 }: {
-  summary: BudgetSummary
-  cur: string
-  dispCur: string | null | undefined
-  rate: number | null | undefined
+  label: string; amount: number; currency: string
+  dispAmount?: number | null; dispCurrency?: string | null
+  highlight?: boolean; negative?: boolean
 }): React.JSX.Element {
-  const { net_spent, available_amount, monthly_goal, day_spent, week_spent, months_count, goal } = summary
-  const { start_date, end_date } = summary.budget
-
-  // Le budget est-il actif aujourd'hui ?
-  const todayISO    = new Date().toISOString().slice(0, 10)
-  const isActive    = todayISO >= start_date && todayISO <= end_date
-  const hasNotStarted = todayISO < start_date
-
-  const [period, setPeriod] = useState<PeriodKey>('mois')
-
-  // Si le budget n'est pas actif, forcer la vue "total"
-  const effectivePeriod: PeriodKey = isActive ? period : 'total'
-
-  // Quotas par période
-  const weeklyQuota  = monthly_goal * 12 / 52
-  const dailyQuota   = monthly_goal / 30.44
-
-  const periodData: Record<PeriodKey, { label: string; spent: number; quota: number; warn?: number }> = {
-    total:   { label: 'Total',    spent: net_spent,   quota: available_amount, warn: available_amount * 0.8 },
-    mois:    { label: 'Ce mois',  spent: summary.current_period_spent - summary.current_period_revenue,
-                                   quota: monthly_goal, warn: goal?.critical_threshold },
-    semaine: { label: 'Semaine',  spent: week_spent,   quota: weeklyQuota,   warn: weeklyQuota * 0.85 },
-    jour:    { label: 'Jour',     spent: day_spent,    quota: dailyQuota,    warn: dailyQuota  * 0.85 },
-  }
-
-  const current  = periodData[effectivePeriod]
-  const spentPct = pct(current.spent, current.quota)
-  const isOver   = current.spent > current.quota
-  const isWarn   = !isOver && current.warn !== undefined && current.spent >= current.warn
-
-  const tabs: PeriodKey[] = ['total', 'mois', 'semaine', 'jour']
+  const textColor = negative
+    ? 'text-red-400'
+    : highlight
+      ? 'text-[var(--color-primary)]'
+      : 'text-white'
 
   return (
-    <div className="flex flex-col gap-3">
-      {/* Bannière si budget non actif */}
-      {!isActive && (
-        <div className="flex items-center gap-2 px-3 py-2 bg-slate-700/40 border border-slate-600/30 rounded-lg">
-          <CalendarDays className="w-3.5 h-3.5 text-slate-400 shrink-0" />
-          <p className="text-xs text-slate-400">
-            {hasNotStarted
-              ? `Budget démarre le ${new Date(start_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} — seule la vue totale est disponible.`
-              : `Budget terminé le ${new Date(end_date).toLocaleDateString('fr-FR', { day: 'numeric', month: 'long', year: 'numeric' })} — seule la vue totale est disponible.`}
-          </p>
-        </div>
+    <div className={`flex flex-col gap-1.5 p-4 rounded-xl border ${
+      highlight
+        ? 'bg-[var(--color-primary)]/10 border-[var(--color-primary)]/30'
+        : 'bg-slate-800/60 border-slate-700/40'
+    }`}>
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{label}</p>
+      <p className={`text-lg font-bold leading-tight ${textColor}`}>{fmt(amount, currency)}</p>
+      {dispAmount != null && dispCurrency && (
+        <p className="text-[10px] text-slate-600">~{fmt(dispAmount, dispCurrency)}</p>
       )}
+    </div>
+  )
+}
 
-      {/* Toggles (visibles uniquement si budget actif) */}
-      {isActive && (
-      <div className="flex gap-1 bg-slate-900/60 rounded-lg p-1">
-        {tabs.map((t) => (
-          <button
-            key={t}
-            onClick={() => setPeriod(t)}
-            className={`flex-1 py-1.5 text-xs font-medium rounded-md transition-all capitalize ${
-              period === t
-                ? 'bg-[var(--color-primary)] text-white shadow'
-                : 'text-slate-500 hover:text-slate-300'
-            }`}
-          >
-            {periodData[t].label}
-          </button>
-        ))}
+// ── ExpenseRow / ExpenseSection ───────────────────────────────────────────────
+
+function ExpenseRow({
+  icon, label, subtitle, amount, currency, dispAmount, dispCurrency
+}: {
+  icon: string; label: string; subtitle?: string
+  amount: number; currency: string
+  dispAmount?: number | null; dispCurrency?: string | null
+}): React.JSX.Element {
+  return (
+    <div className="flex items-center gap-3 py-2.5 border-b border-slate-800/70 last:border-0">
+      <span className="text-base w-6 text-center shrink-0 select-none">{icon}</span>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-slate-200 truncate">{label}</p>
+        {subtitle && <p className="text-[11px] text-slate-600 truncate mt-0.5">{subtitle}</p>}
       </div>
-      )}
-
-      {/* Montant dépensé */}
-      <div className="flex items-end justify-between gap-2 pt-1">
-        <div>
-          <p className="text-xs text-slate-500 mb-0.5">Dépensé</p>
-          <p className={`text-2xl font-bold ${isOver ? 'text-red-400' : isWarn ? 'text-amber-400' : 'text-white'}`}>
-            {fmt(current.spent, cur)}
-          </p>
-          {dispCur && rate && (
-            <p className="text-xs text-slate-500 mt-0.5">≈ {fmt(current.spent * rate, dispCur)}</p>
-          )}
-        </div>
-        <div className="text-right">
-          <p className="text-xs text-slate-500 mb-0.5">Quota</p>
-          <p className="text-sm font-semibold text-slate-300">{fmt(current.quota, cur)}</p>
-          <p className="text-xs text-slate-600 mt-0.5">{spentPct}% utilisé</p>
-        </div>
-      </div>
-
-      {/* Barre de progression */}
-      <div className="relative h-2 bg-slate-700 rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all ${
-            isOver ? 'bg-red-500' : isWarn ? 'bg-amber-500' : 'bg-[var(--color-primary)]'
-          }`}
-          style={{ width: `${Math.min(100, spentPct)}%` }}
-        />
-        {/* Marqueur seuil critique (mois uniquement) */}
-        {effectivePeriod === 'mois' && goal && (
-          <div
-            className="absolute top-0 h-full w-px bg-amber-500/70 pointer-events-none"
-            style={{ left: `${pct(goal.critical_threshold, current.quota)}%` }}
-          />
-        )}
-      </div>
-
-      {/* Légende */}
-      <div className="flex items-center justify-between text-[11px] text-slate-600">
-        <span>
-          Reste :{' '}
-          <span className={`font-medium ${current.quota - current.spent < 0 ? 'text-red-400' : 'text-slate-400'}`}>
-            {fmt(Math.max(0, current.quota - current.spent), cur)}
-          </span>
-        </span>
-        {effectivePeriod === 'mois' && goal && (
-          <span className="text-amber-700">⚡ seuil {fmt(goal.critical_threshold, cur)}</span>
-        )}
-        {effectivePeriod === 'total' && (
-          <span>{months_count} mois au total</span>
+      <div className="text-right shrink-0">
+        <p className="text-sm font-semibold text-slate-200">{fmt(amount, currency)}</p>
+        {dispAmount != null && dispCurrency && (
+          <p className="text-[10px] text-slate-600">{fmt(dispAmount, dispCurrency)}</p>
         )}
       </div>
     </div>
   )
 }
 
-// ── OverviewTab v2 ────────────────────────────────────────────────────────────
+function ExpenseSection({
+  title, total, currency, dispCurrency, rate, children
+}: {
+  title: string; total: number; currency: string
+  dispCurrency?: string | null; rate?: number | null
+  children: React.ReactNode
+}): React.JSX.Element {
+  return (
+    <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-slate-700/40">
+        <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">{title}</p>
+      </div>
+      <div className="px-4">{children}</div>
+      <div className="px-4 py-2.5 border-t border-slate-700/40 flex items-center justify-between">
+        <span className="text-xs font-semibold text-slate-500">Total</span>
+        <div className="text-right">
+          <p className="text-sm font-bold text-red-400">{fmt(total, currency)}</p>
+          {dispCurrency && rate && (
+            <p className="text-[10px] text-slate-600">{fmt(total * rate, dispCurrency)}</p>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ── CheckupModal ──────────────────────────────────────────────────────────────
+
+function CheckupModal({
+  checkup,
+  budgetId,
+  budgetLibreMonthly,
+  currency,
+  onAcknowledge
+}: {
+  checkup: BudgetCheckup
+  budgetId: number
+  budgetLibreMonthly: number
+  currency: string
+  onAcknowledge: () => void
+}): React.JSX.Element {
+  const [detail, setDetail] = useState<BudgetCheckupDetail | null>(null)
+  const [acknowledging, setAcknowledging] = useState(false)
+
+  useEffect(() => {
+    window.api.budget.checkupDetail(budgetId, checkup.month).then((d) => {
+      if (d) setDetail(d)
+    })
+  }, [budgetId, checkup.month])
+
+  const handleAcknowledge = async (): Promise<void> => {
+    setAcknowledging(true)
+    await window.api.budget.acknowledgeCheckup(checkup.id)
+    onAcknowledge()
+  }
+
+  const modal = (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 backdrop-blur-sm p-4">
+      <div className="bg-slate-900 border border-slate-700/60 rounded-2xl w-full max-w-sm max-h-[85vh] overflow-auto flex flex-col gap-0 shadow-2xl">
+        {/* Header */}
+        <div className="px-5 py-4 border-b border-slate-700/50">
+          <p className="text-base font-bold text-white">
+            🗓️ Bilan de {detail?.month_label ?? checkup.month}
+          </p>
+          <p className="text-xs text-slate-500 mt-0.5">Bilan mensuel de ton budget</p>
+        </div>
+
+        {detail == null ? (
+          <div className="flex items-center justify-center py-12">
+            <Loader2 className="w-5 h-5 text-slate-500 animate-spin" />
+          </div>
+        ) : (
+          <>
+            {/* Revenus / Dépenses */}
+            <div className="px-5 py-4 flex flex-col gap-2">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Revenus reçus</span>
+                <span className="text-sm font-semibold text-emerald-400">
+                  +{fmt(detail.revenue_received, currency, 2)}
+                </span>
+              </div>
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-slate-400">Dépenses payées</span>
+                <span className="text-sm font-semibold text-red-400">
+                  -{fmt(detail.expenses_paid, currency, 2)}
+                </span>
+              </div>
+            </div>
+
+            {/* Enveloppes */}
+            {detail.envelope_details.length > 0 && (
+              <div className="px-5 pb-4 flex flex-col gap-1">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-600 mb-1">
+                  Enveloppes
+                </p>
+                <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
+                  {/* Table header */}
+                  <div className="grid grid-cols-4 px-3 py-1.5 border-b border-slate-700/40">
+                    <span className="col-span-2 text-[10px] text-slate-600 font-medium">Catégorie</span>
+                    <span className="text-[10px] text-slate-600 font-medium text-right">Budget</span>
+                    <span className="text-[10px] text-slate-600 font-medium text-right">Report</span>
+                  </div>
+                  {detail.envelope_details.map((env, i) => (
+                    <div
+                      key={i}
+                      className="grid grid-cols-4 px-3 py-2 border-b border-slate-800/70 last:border-0 items-center"
+                    >
+                      <div className="col-span-2 flex items-center gap-1.5 min-w-0">
+                        <span className="text-sm">{env.category_icon}</span>
+                        <span className="text-xs text-slate-300 truncate">{env.category_name}</span>
+                      </div>
+                      <span className="text-xs text-slate-400 text-right">{fmt(env.budget, currency)}</span>
+                      <span className={`text-xs font-semibold text-right ${env.rollover >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                        {env.rollover >= 0 ? '+' : ''}{fmt(env.rollover, currency)}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Total rollover */}
+            <div className="px-5 pb-3 flex items-center justify-between bg-emerald-500/5 border-t border-slate-700/40 py-3">
+              <span className="text-sm font-semibold text-slate-300">Total report</span>
+              <span className={`text-sm font-bold ${detail.total_rollover >= 0 ? 'text-emerald-400' : 'text-red-400'}`}>
+                {detail.total_rollover >= 0 ? '+' : ''}{fmt(detail.total_rollover, currency, 2)}
+              </span>
+            </div>
+
+            {/* Budget libre accumulé */}
+            <div className="px-5 py-3 border-t border-slate-700/40 flex flex-col gap-0.5">
+              <p className="text-xs text-slate-500">Budget libre accumulé ce mois</p>
+              <p className="text-lg font-bold text-emerald-400">
+                {fmt(budgetLibreMonthly + detail.total_rollover, currency, 2)}
+              </p>
+              <p className="text-[11px] text-slate-600">
+                dont {fmt(budgetLibreMonthly, currency, 2)} / mois
+              </p>
+            </div>
+
+            {/* Bouton */}
+            <div className="px-5 pb-5 pt-2">
+              <button
+                onClick={() => void handleAcknowledge()}
+                disabled={acknowledging}
+                className="w-full flex items-center justify-center gap-2 py-2.5 bg-emerald-500 hover:opacity-90 disabled:opacity-50 rounded-xl text-white text-sm font-semibold transition-all"
+              >
+                {acknowledging ? <Loader2 className="w-4 h-4 animate-spin" /> : null}
+                J'ai compris 👍
+              </button>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  )
+
+  return createPortal(modal, document.body)
+}
+
+// ── MonthlyGraph ──────────────────────────────────────────────────────────────
+
+function MonthlyGraph({
+  budgetId,
+  currency
+}: {
+  budgetId: number
+  currency: string
+}): React.JSX.Element {
+  const [data,    setData]    = useState<BudgetMonthlyData[]>([])
+  const [loading, setLoading] = useState(true)
+  const [hovered, setHovered] = useState<number | null>(null)
+
+  useEffect(() => {
+    window.api.budget.monthlyData(budgetId).then((d) => {
+      setData(d)
+      setLoading(false)
+    })
+  }, [budgetId])
+
+  if (loading) {
+    return (
+      <div className="flex justify-center py-6">
+        <Loader2 className="w-4 h-4 animate-spin text-slate-600" />
+      </div>
+    )
+  }
+  if (data.length === 0) {
+    return <p className="text-xs text-slate-600 py-3 text-center">Aucune donnée</p>
+  }
+
+  const BAR_W = 24
+  const GAP   = 4
+  const GROUP = BAR_W * 2 + GAP + 14
+  const H     = 100
+  const PAD_B = 22
+  const PAD_L = 34
+  const PAD_T = 32   // space for tooltip above bars
+
+  const maxVal = Math.max(...data.map((d) => Math.max(d.planned, d.actual)), 1)
+  const svgW   = PAD_L + data.length * GROUP + 8
+  const svgH   = PAD_T + H + PAD_B
+
+  const barH = (v: number): number => Math.max(2, (v / maxVal) * H)
+
+  // Y axis: 3 levels
+  const ticks = [0, 0.5, 1].map((f) => Math.round(maxVal * f))
+
+  return (
+    <div className="overflow-x-auto">
+      <svg width={svgW} height={svgH} className="select-none block" style={{ minWidth: svgW }}>
+        {/* Grid lines + Y labels */}
+        {ticks.map((tick, i) => {
+          const y = PAD_T + H - (tick / maxVal) * H
+          return (
+            <g key={i}>
+              <line
+                x1={PAD_L - 3} y1={y} x2={svgW - 4} y2={y}
+                stroke="#1e293b" strokeWidth={1} strokeDasharray={i === 0 ? '0' : '3 3'}
+              />
+              <text x={PAD_L - 5} y={y + 3.5} textAnchor="end" fontSize={7.5} fill="#334155">
+                {tick >= 1000 ? `${(tick / 1000).toFixed(tick >= 10000 ? 0 : 1)}k` : tick}
+              </text>
+            </g>
+          )
+        })}
+
+        {/* Bars per month */}
+        {data.map((d, i) => {
+          const x      = PAD_L + i * GROUP
+          const isOver = !d.is_future && d.actual > d.planned && d.planned > 0
+          const isHov  = hovered === i
+
+          const pH = barH(d.planned)
+          const aH = barH(d.actual)
+          const pY = PAD_T + H - pH
+          const aY = PAD_T + H - aH
+
+          // Tooltip: show above the tallest bar
+          const tipY   = Math.min(pY, aY) - 36
+          const tipX   = x + (BAR_W * 2 + GAP) / 2
+          const tipVis = isHov && tipY > 0
+
+          return (
+            <g
+              key={d.month}
+              onMouseEnter={() => setHovered(i)}
+              onMouseLeave={() => setHovered(null)}
+            >
+              {/* Planned bar */}
+              <rect
+                x={x} y={pY} width={BAR_W} height={pH} rx={3}
+                fill={d.is_future ? '#1e293b' : '#4f5fa8'}
+                opacity={d.is_future ? 0.5 : isHov ? 1 : 0.85}
+              />
+              {/* Actual bar (only non-future) */}
+              {!d.is_future && (
+                <rect
+                  x={x + BAR_W + GAP} y={aY} width={BAR_W} height={aH} rx={3}
+                  fill={isOver ? '#ef4444' : '#22c55e'}
+                  opacity={isHov ? 1 : 0.85}
+                />
+              )}
+              {/* Month label */}
+              <text
+                x={x + BAR_W + GAP / 2}
+                y={PAD_T + H + 13}
+                textAnchor="middle"
+                fontSize={8.5}
+                fill={d.is_future ? '#1e293b' : '#475569'}
+              >
+                {d.month_label}
+              </text>
+
+              {/* Hover tooltip */}
+              {tipVis && (
+                <g>
+                  <rect
+                    x={tipX - 28} y={tipY - 2}
+                    width={56} height={d.is_future ? 20 : 34}
+                    rx={4} fill="#0f172a" stroke="#334155" strokeWidth={0.5}
+                  />
+                  <text x={tipX} y={tipY + 9} textAnchor="middle" fontSize={7.5} fill="#94a3b8" fontWeight="600">
+                    {d.month_label}
+                  </text>
+                  <text x={tipX} y={tipY + 19} textAnchor="middle" fontSize={7.5} fill="#6366f1">
+                    {`P: ${Math.round(d.planned)} ${currency}`}
+                  </text>
+                  {!d.is_future && (
+                    <text x={tipX} y={tipY + 29} textAnchor="middle" fontSize={7.5} fill={isOver ? '#f87171' : '#4ade80'}>
+                      {`R: ${Math.round(d.actual)} ${currency}`}
+                    </text>
+                  )}
+                </g>
+              )}
+            </g>
+          )
+        })}
+
+        {/* Legend */}
+        <g transform={`translate(${PAD_L}, ${svgH - 6})`}>
+          <rect x={0} y={-6} width={8} height={8} rx={2} fill="#4f5fa8" />
+          <text x={11} y={1} fontSize={8} fill="#475569">Planifié</text>
+          <rect x={52} y={-6} width={8} height={8} rx={2} fill="#22c55e" />
+          <text x={63} y={1} fontSize={8} fill="#475569">Réel</text>
+          <rect x={90} y={-6} width={8} height={8} rx={2} fill="#ef4444" />
+          <text x={101} y={1} fontSize={8} fill="#475569">Dépassé</text>
+        </g>
+      </svg>
+    </div>
+  )
+}
+
+// ── OverviewTab ───────────────────────────────────────────────────────────────
 
 function OverviewTab({
   summary,
-  budgetId
+  budgetId,
+  onRefresh
 }: {
   summary: BudgetSummary
   budgetId: number
+  onRefresh: () => Promise<void>
 }): React.JSX.Element {
   const {
-    budget,
-    goal,
+    budget, goal,
     extra_items,
-    extra_total,
-    available_amount,
-    net_spent,
-    total_remaining,
-    months_remaining,
+    planned_total, marge_libre,
+    expense_recurring_items, revenue_items, envelope_items,
+    total_budget_available,
+    budget_libre_monthly, cumulative_budget_libre,
     months_count,
-    display_remaining,
-    savings,
-    display_savings,
-    monthly_goal
+    current_period_spent, current_period_revenue,
+    savings_goal: initialSavingsGoal,
   } = summary
 
   const cur     = budget.currency
   const dispCur = budget.display_currency
   const rate    = budget.display_rate
 
-  const [catSpending, setCatSpending] = useState<CategorySpending[]>([])
+  const [period,       setPeriod]       = useState<PeriodKey>('total')
+  const [savingsGoal,  setSavingsGoal]  = useState(initialSavingsGoal)
+  const [updatingGoal, setUpdatingGoal] = useState(false)
+  const [catSpending,  setCatSpending]  = useState<CategorySpending[]>([])
 
   const loadCatSpending = useCallback(async () => {
     const result = await window.api.budget.categorySpending(budgetId)
@@ -474,27 +698,58 @@ function OverviewTab({
 
   useEffect(() => { void loadCatSpending() }, [loadCatSpending])
 
-  // Calcul de la marge d'économie (ratio objectif mensuel / allocation brute)
-  const rawMonthly     = months_count > 0 ? available_amount / months_count : 0
-  const marginPct      = rawMonthly > 0 ? Math.round((monthly_goal / rawMonthly) * 100) : 100
-  const bourseEffective = total_remaining * (marginPct / 100)
+  // Mise à jour de l'objectif de réserve (sauvegardée en base)
+  const handleSavingsGoal = async (pct: number): Promise<void> => {
+    setSavingsGoal(pct)
+    setUpdatingGoal(true)
+    await window.api.budget.update({ id: budgetId, savings_goal: pct })
+    setUpdatingGoal(false)
+    await onRefresh()
+  }
+
+  // Valeurs KPI ramenées à la période
+  const div              = divByPeriod(period, months_count)
+  const budgetAmt        = total_budget_available / div
+  const plannedAmt       = planned_total / div
+  const margeAmt         = marge_libre / div
+  const libreAmt         = margeAmt * (1 - savingsGoal / 100)
+  const reserveAmt       = margeAmt * savingsGoal / 100
+
+  // Totaux des tableaux pour la période
+  const extraTotal     = extra_items.reduce(
+    (a, e) => a + extraForPeriod(e.amount, period, months_count), 0
+  )
+  const expenseRecurringTotal = expense_recurring_items.reduce(
+    (a, r) => a + recurringForPeriod(r.amount_base_monthly, period, months_count), 0
+  )
+  const revenueRecurringTotal = revenue_items.reduce(
+    (a, r) => a + recurringForPeriod(r.amount_base_monthly, period, months_count), 0
+  )
+  const envelopeTotal = envelope_items.reduce(
+    (a, e) => a + recurringForPeriod(e.monthly_limit, period, months_count), 0
+  )
 
   // Alertes dépassement mois courant
-  const periodNet  = summary.current_period_spent - summary.current_period_revenue
+  const periodNet    = current_period_spent - current_period_revenue
   const overTarget   = goal && periodNet >= goal.monthly_target
   const overCritical = goal && !overTarget && periodNet >= goal.critical_threshold
 
+  // Titre du header avec la durée complète du budget
+  const fmtDate = (d: string): string =>
+    new Date(d).toLocaleDateString('fr-FR', { day: '2-digit', month: '2-digit', year: 'numeric' })
+
+  const SAVINGS_OPTS = [0, 5, 10, 15, 20, 25, 30]
+
   return (
-    <div className="flex flex-col gap-3">
-      {/* ── Alerte dépassement ── */}
+    <div className="flex flex-col gap-4">
+
+      {/* ── Alerte dépassement mois courant ── */}
       {(overTarget || overCritical) && (
-        <div
-          className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
-            overTarget
-              ? 'bg-red-500/10 border-red-500/30 text-red-300'
-              : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
-          }`}
-        >
+        <div className={`flex items-center gap-3 px-4 py-3 rounded-xl border ${
+          overTarget
+            ? 'bg-red-500/10 border-red-500/30 text-red-300'
+            : 'bg-amber-500/10 border-amber-500/30 text-amber-300'
+        }`}>
           <AlertTriangle className="w-4 h-4 shrink-0" />
           <p className="text-sm">
             {overTarget
@@ -504,105 +759,273 @@ function OverviewTab({
         </div>
       )}
 
-      {/* ── Section 1 : Résumé de la bourse ── */}
-      <Collapsible
-        title="Résumé de la bourse"
-        icon={<Wallet className="w-4 h-4 text-[var(--color-primary)]" />}
-        defaultOpen={true}
-      >
-        {/* Lignes bilan */}
-        <div className="flex flex-col divide-y divide-slate-700/40 mt-1">
-          {/* Bourse totale */}
-          <div className="flex items-center justify-between py-2.5">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Bourse totale</p>
-              {extra_total > 0 && (
-                <p className="text-[11px] text-slate-600 mt-0.5">
-                  dont {fmt(extra_total, cur)} hors-budget
-                </p>
-              )}
-            </div>
-            <div className="text-right">
-              <p className="text-sm font-semibold text-white">{fmt(budget.total_amount, cur)}</p>
-              {dispCur && rate && (
-                <p className="text-[11px] text-slate-500">≈ {fmt(budget.total_amount * rate, dispCur)}</p>
-              )}
-            </div>
-          </div>
+      {/* ── Header période ── */}
+      <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-600">
+        Vue d'ensemble — {months_count} mois &nbsp;({fmtDate(budget.start_date)} → {fmtDate(budget.end_date)})
+      </p>
 
-          {/* Bourse nette (– hors-budget) */}
-          {extra_total > 0 && (
-            <div className="flex items-center justify-between py-2.5">
-              <p className="text-xs text-slate-400 font-medium">Bourse nette <span className="text-slate-600 font-normal">(– hors-budget)</span></p>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-white">{fmt(available_amount, cur)}</p>
-                {dispCur && rate && (
-                  <p className="text-[11px] text-slate-500">≈ {fmt(available_amount * rate, dispCur)}</p>
-                )}
-              </div>
-            </div>
-          )}
+      {/* ── Sélecteur de période ── */}
+      <div className="flex gap-1 bg-slate-900/60 rounded-xl p-1">
+        {(Object.keys(PERIOD_LABELS) as PeriodKey[]).map((p) => (
+          <button
+            key={p}
+            onClick={() => setPeriod(p)}
+            className={`flex-1 py-1.5 text-xs font-medium rounded-lg transition-all ${
+              period === p
+                ? 'bg-[var(--color-primary)] text-white shadow'
+                : 'text-slate-500 hover:text-slate-300'
+            }`}
+          >
+            {PERIOD_LABELS[p]}
+          </button>
+        ))}
+      </div>
 
-          {/* Bourse finale (solde restant) */}
-          <div className="flex items-center justify-between py-2.5">
-            <div>
-              <p className="text-xs text-slate-400 font-medium">Bourse finale <span className="text-slate-600 font-normal">(solde restant)</span></p>
-              <p className="text-[11px] text-slate-600 mt-0.5">{months_remaining} mois restants · {fmt(net_spent, cur)} dépensés</p>
-            </div>
-            <div className="text-right">
-              <p className={`text-sm font-semibold ${total_remaining >= 0 ? 'text-white' : 'text-red-400'}`}>
-                {fmt(total_remaining, cur)}
-              </p>
-              {dispCur && rate && (
-                <p className="text-[11px] text-slate-500">≈ {fmt(display_remaining ?? total_remaining * rate, dispCur)}</p>
-              )}
-            </div>
-          </div>
+      {/* ── 4 KPI cards ── */}
+      <div className="grid grid-cols-2 gap-2">
+        <KpiCard
+          label="Budget disponible"
+          amount={budgetAmt}
+          currency={cur}
+          dispAmount={rate ? budgetAmt * rate : null}
+          dispCurrency={dispCur}
+        />
+        <KpiCard
+          label="Montant à dépenser"
+          amount={plannedAmt}
+          currency={cur}
+          dispAmount={rate ? plannedAmt * rate : null}
+          dispCurrency={dispCur}
+          negative={plannedAmt > budgetAmt}
+        />
+        <KpiCard
+          label="Marge libre"
+          amount={margeAmt}
+          currency={cur}
+          dispAmount={rate ? margeAmt * rate : null}
+          dispCurrency={dispCur}
+          negative={margeAmt < 0}
+        />
+        <KpiCard
+          label="Budget libre"
+          amount={libreAmt}
+          currency={cur}
+          dispAmount={rate ? libreAmt * rate : null}
+          dispCurrency={dispCur}
+          highlight
+          negative={libreAmt < 0}
+        />
+      </div>
 
-          {/* Bourse effective (avec marge d'économie) */}
-          {goal && marginPct < 100 && (
-            <div className="flex items-center justify-between py-2.5">
-              <div>
-                <p className="text-xs text-slate-400 font-medium">
-                  Bourse effective{' '}
-                  <span className="text-[var(--color-primary)] font-normal">×{marginPct}%</span>
-                </p>
-                <p className="text-[11px] text-slate-600 mt-0.5">Objectif d'économie activé par l'IA</p>
-              </div>
-              <div className="text-right">
-                <p className="text-sm font-semibold text-[var(--color-primary)]">{fmt(bourseEffective, cur)}</p>
-                {dispCur && rate && (
-                  <p className="text-[11px] text-slate-500">≈ {fmt(bourseEffective * rate, dispCur)}</p>
-                )}
-              </div>
-            </div>
-          )}
+      {/* ── Cagnotte budget libre ── */}
+      <div className="bg-emerald-500/10 border border-emerald-500/30 rounded-xl p-4 flex items-center gap-3">
+        <PiggyBank className="w-5 h-5 text-emerald-400 shrink-0" />
+        <div className="flex-1 min-w-0">
+          <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-600">Cagnotte budget libre</p>
+          <p className="text-lg font-bold text-emerald-400">{fmt(cumulative_budget_libre, cur, 2)}</p>
+          <p className="text-[11px] text-slate-500">dont {fmt(budget_libre_monthly, cur, 2)} / mois</p>
         </div>
+      </div>
 
-        {/* Barre globale */}
-        <div className="mt-3">
-          <ProgressBar
-            value={net_spent}
-            max={available_amount}
-            warn={available_amount * 0.75}
-            danger={available_amount}
-            label={`${fmt(net_spent, cur)} dépensé sur ${fmt(available_amount, cur)}`}
-          />
+      {/* ── Graphique évolution mensuelle ── */}
+      <Collapsible
+        title="Évolution mensuelle"
+        icon={<TrendingDown className="w-4 h-4 text-[var(--color-primary)]" />}
+        defaultOpen={months_count <= 6}
+      >
+        <div className="pt-2">
+          <MonthlyGraph budgetId={budgetId} currency={cur} />
         </div>
       </Collapsible>
 
-      {/* ── Section 2 : Dépenses par période ── */}
-      <Collapsible
-        title="Dépenses par période"
-        icon={<CalendarDays className="w-4 h-4 text-[var(--color-primary)]" />}
-        defaultOpen={true}
-      >
-        <div className="mt-1">
-          <PeriodView summary={summary} cur={cur} dispCur={dispCur} rate={rate} />
+      {/* ── Objectif de réserve ── */}
+      <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-4 flex flex-col gap-3">
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <PiggyBank className="w-4 h-4 text-emerald-400" />
+            <p className="text-xs font-semibold text-slate-300">Objectif de réserve</p>
+            {updatingGoal && <Loader2 className="w-3 h-3 text-slate-500 animate-spin" />}
+          </div>
+          {savingsGoal > 0 && (
+            <p className="text-xs text-slate-500">
+              Réserve :{' '}
+              <span className="text-emerald-400 font-semibold">{fmt(reserveAmt, cur)}</span>
+            </p>
+          )}
         </div>
-      </Collapsible>
+        <div className="flex gap-1.5 flex-wrap">
+          {SAVINGS_OPTS.map((opt) => (
+            <button
+              key={opt}
+              onClick={() => void handleSavingsGoal(opt)}
+              className={`px-3 py-1.5 rounded-lg text-xs font-medium border transition-all ${
+                savingsGoal === opt
+                  ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+                  : 'bg-slate-900/60 border-slate-700/40 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              {opt}%
+            </button>
+          ))}
+        </div>
+      </div>
 
-      {/* ── Section 3 : Par catégorie ── */}
+      {/* ── Dépenses fixes (uniques) ── */}
+      {extra_items.length > 0 && (
+        <ExpenseSection
+          title="Dépenses fixes (uniques)"
+          total={extraTotal}
+          currency={cur}
+          dispCurrency={dispCur}
+          rate={rate}
+        >
+          {extra_items.map((e) => (
+            <ExpenseRow
+              key={e.id}
+              icon="📦"
+              label={e.label}
+              subtitle={e.planned_date ?? undefined}
+              amount={extraForPeriod(e.amount, period, months_count)}
+              currency={cur}
+              dispAmount={rate ? extraForPeriod(e.amount, period, months_count) * rate : null}
+              dispCurrency={dispCur}
+            />
+          ))}
+        </ExpenseSection>
+      )}
+
+      {/* ── Abonnements (dépenses récurrentes) ── */}
+      {expense_recurring_items.length > 0 && (
+        <ExpenseSection
+          title={`Abonnements${period === 'total' ? ` (× ${months_count} mois)` : ''}`}
+          total={expenseRecurringTotal}
+          currency={cur}
+          dispCurrency={dispCur}
+          rate={rate}
+        >
+          {expense_recurring_items.map((r) => (
+            <ExpenseRow
+              key={r.id}
+              icon={r.category_icon ?? '💳'}
+              label={r.label}
+              subtitle={r.currency !== cur ? `${fmt(r.amount, r.currency)}/mois` : undefined}
+              amount={recurringForPeriod(r.amount_base_monthly, period, months_count)}
+              currency={cur}
+              dispAmount={rate ? recurringForPeriod(r.amount_base_monthly, period, months_count) * rate : null}
+              dispCurrency={dispCur}
+            />
+          ))}
+        </ExpenseSection>
+      )}
+
+      {/* ── Sources de revenus ── */}
+      {revenue_items.length > 0 && (
+        <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-slate-700/40 flex items-center gap-2">
+            <TrendingUp className="w-3.5 h-3.5 text-emerald-400" />
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Sources de revenus{period === 'total' ? ` (× ${months_count} mois)` : ''}
+            </p>
+          </div>
+          <div className="px-4">
+            {revenue_items.map((r) => (
+              <div key={r.id} className="flex items-center gap-3 py-2.5 border-b border-slate-800/70 last:border-0">
+                <span className="text-base w-6 text-center shrink-0 select-none">💰</span>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-medium text-slate-200 truncate">{r.label}</p>
+                  {r.currency !== cur && (
+                    <p className="text-[11px] text-slate-600 truncate mt-0.5">{fmt(r.amount, r.currency)}/mois</p>
+                  )}
+                </div>
+                <div className="text-right shrink-0">
+                  <p className="text-sm font-semibold text-emerald-400">
+                    +{fmt(recurringForPeriod(r.amount_base_monthly, period, months_count), cur)}
+                  </p>
+                  {rate && (
+                    <p className="text-[10px] text-slate-600">
+                      {fmt(recurringForPeriod(r.amount_base_monthly, period, months_count) * rate, dispCur!)}
+                    </p>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+          <div className="px-4 py-2.5 border-t border-slate-700/40 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-500">Total</span>
+            <div className="text-right">
+              <p className="text-sm font-bold text-emerald-400">+{fmt(revenueRecurringTotal, cur)}</p>
+              {dispCur && rate && (
+                <p className="text-[10px] text-slate-600">{fmt(revenueRecurringTotal * rate, dispCur)}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Enveloppes mensuelles ── */}
+      {envelope_items.length > 0 && (
+        <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl overflow-hidden">
+          <div className="px-4 py-2.5 border-b border-slate-700/40">
+            <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">
+              Enveloppes mensuelles{period === 'total' ? ` (× ${months_count} mois)` : ''}
+            </p>
+          </div>
+          <div className="px-4">
+            {envelope_items.map((e) => {
+              const plannedAmt = recurringForPeriod(e.monthly_limit, period, months_count)
+              const spentPct = e.monthly_limit > 0 ? pct(e.current_month_spent, e.monthly_limit) : 0
+              const isOver = e.current_month_spent >= e.monthly_limit
+              return (
+                <div key={e.id} className="flex flex-col gap-1.5 py-2.5 border-b border-slate-800/70 last:border-0">
+                  <div className="flex items-center gap-3">
+                    <div
+                      className="w-6 h-6 rounded-lg flex items-center justify-center text-sm shrink-0"
+                      style={{ background: `${e.category_color}22` }}
+                    >
+                      {e.category_icon}
+                    </div>
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-medium text-slate-200 truncate">{e.category_name}</p>
+                      {e.current_month_spent > 0 && (
+                        <p className="text-[11px] text-slate-600 mt-0.5">
+                          Dépensé ce mois : {fmt(e.current_month_spent, cur, 2)}
+                        </p>
+                      )}
+                    </div>
+                    <p className="text-sm font-semibold text-[var(--color-primary)] shrink-0">
+                      {fmt(plannedAmt, cur)}
+                    </p>
+                  </div>
+                  {e.current_month_spent > 0 && (
+                    <div className="ml-9 flex items-center gap-2">
+                      <div className="flex-1 h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                        <div
+                          className={`h-full rounded-full transition-all duration-500 ${isOver ? 'bg-red-500' : 'bg-[var(--color-primary)]'}`}
+                          style={{ width: `${spentPct}%` }}
+                        />
+                      </div>
+                      <span className={`text-[10px] font-medium w-7 text-right ${isOver ? 'text-red-400' : 'text-slate-600'}`}>
+                        {spentPct}%
+                      </span>
+                    </div>
+                  )}
+                </div>
+              )
+            })}
+          </div>
+          <div className="px-4 py-2.5 border-t border-slate-700/40 flex items-center justify-between">
+            <span className="text-xs font-semibold text-slate-500">Total</span>
+            <div className="text-right">
+              <p className="text-sm font-bold text-[var(--color-primary)]">{fmt(envelopeTotal, cur)}</p>
+              {dispCur && rate && (
+                <p className="text-[10px] text-slate-600">{fmt(envelopeTotal * rate, dispCur)}</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Par catégorie (mois courant) ── */}
       <Collapsible
         title="Par catégorie"
         icon={<Tag className="w-4 h-4 text-[var(--color-primary)]" />}
@@ -630,62 +1053,6 @@ function OverviewTab({
         )}
       </Collapsible>
 
-      {/* ── Section 4 : Cagnotte ── */}
-      {savings > 0 && (
-        <Collapsible
-          title="Cagnotte"
-          icon={<PiggyBank className="w-4 h-4 text-emerald-400" />}
-          defaultOpen={true}
-        >
-          <div className="flex items-center gap-3 mt-2">
-            <div className="w-10 h-10 rounded-xl bg-emerald-500/15 flex items-center justify-center shrink-0">
-              <PiggyBank className="w-5 h-5 text-emerald-400" />
-            </div>
-            <div>
-              <p className="text-base font-bold text-emerald-300">
-                {fmt(savings, cur)} économisés 🎉
-              </p>
-              <p className="text-xs text-emerald-700 mt-0.5">
-                {display_savings && dispCur ? `≈ ${fmt(display_savings, dispCur)} · ` : ''}
-                En avance sur l'objectif mensuel de {fmt(monthly_goal, cur)}
-              </p>
-            </div>
-          </div>
-        </Collapsible>
-      )}
-
-      {/* ── Section 5 : Hors-budget ── */}
-      {extra_items.length > 0 && (
-        <Collapsible
-          title="Hors-budget planifiés"
-          icon={<AlertTriangle className="w-4 h-4 text-amber-400" />}
-          badge={
-            <span className="ml-1 px-1.5 py-0.5 bg-amber-500/15 text-amber-400 text-[10px] font-medium rounded-full">
-              {fmt(extra_total, cur)}
-            </span>
-          }
-          defaultOpen={false}
-        >
-          <div className="flex flex-col gap-2 mt-2">
-            {extra_items.map((e) => (
-              <div key={e.id} className="flex items-center justify-between text-sm">
-                <div className="flex items-center gap-2">
-                  <div className="w-1.5 h-1.5 rounded-full bg-amber-500 shrink-0" />
-                  <span className="text-slate-300">{e.label}</span>
-                  {e.planned_date && (
-                    <span className="text-xs text-slate-600">{e.planned_date}</span>
-                  )}
-                </div>
-                <span className="text-amber-400 font-medium">{fmt(e.amount, cur)}</span>
-              </div>
-            ))}
-            <div className="flex items-center justify-between text-sm font-medium border-t border-slate-700 pt-2 mt-1">
-              <span className="text-slate-400">Total hors-budget</span>
-              <span className="text-amber-400">{fmt(extra_total, cur)}</span>
-            </div>
-          </div>
-        </Collapsible>
-      )}
     </div>
   )
 }
@@ -1188,7 +1555,8 @@ function RecurringTab({
     currency: budgetCurrency,
     catId: '',
     type: 'monthly' as 'monthly' | 'weekly',
-    day: '1'
+    day: '1',
+    isRevenue: false
   })
 
   const load = (): void => {
@@ -1209,7 +1577,8 @@ function RecurringTab({
       amount: parseFloat(form.amount),
       currency: form.currency,
       recurrence_type: form.type,
-      recurrence_day: parseInt(form.day)
+      recurrence_day: parseInt(form.day),
+      is_revenue: form.isRevenue
     }
     const r = await window.api.budget.createRecurring(payload)
     setRecurrings((prev) => [...prev, r])
@@ -1219,7 +1588,8 @@ function RecurringTab({
       currency: budgetCurrency,
       catId: '',
       type: 'monthly',
-      day: '1'
+      day: '1',
+      isRevenue: false
     })
     setAdding(false)
   }
@@ -1254,6 +1624,28 @@ function RecurringTab({
         <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
           Nouvelle récurrence
         </p>
+        {/* Type: Abonnement ou Revenu */}
+        <div className="flex gap-2">
+          {[
+            { v: false, label: 'Abonnement (dépense)', icon: TrendingDown },
+            { v: true, label: 'Source de revenu', icon: TrendingUp }
+          ].map((opt) => (
+            <button
+              key={String(opt.v)}
+              onClick={() => setForm((p) => ({ ...p, isRevenue: opt.v }))}
+              className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-xl text-xs border transition-all ${
+                form.isRevenue === opt.v
+                  ? opt.v
+                    ? 'bg-emerald-500/15 border-emerald-500/40 text-emerald-400'
+                    : 'bg-red-500/15 border-red-500/40 text-red-400'
+                  : 'bg-slate-800 border-slate-700 text-slate-500 hover:text-slate-300'
+              }`}
+            >
+              <opt.icon className="w-3 h-3" />
+              {opt.label}
+            </button>
+          ))}
+        </div>
         <input
           value={form.label}
           onChange={(e) => setForm((p) => ({ ...p, label: e.target.value }))}
@@ -1354,45 +1746,334 @@ function RecurringTab({
           <Repeat className="w-8 h-8" />
           <p className="text-sm">Aucune transaction récurrente</p>
         </div>
-      ) : (
-        <div className="flex flex-col gap-2">
-          {recurrings.map((r) => (
-            <div
-              key={r.id}
-              className={`flex items-center gap-3 px-3 py-2.5 border rounded-xl transition-all group ${
+      ) : (() => {
+        const abonnements = recurrings.filter((r) => r.is_revenue === 0)
+        const revenus     = recurrings.filter((r) => r.is_revenue === 1)
+
+        const renderRow = (r: BudgetRecurring): React.JSX.Element => (
+          <div
+            key={r.id}
+            className={`flex items-center gap-3 px-3 py-2.5 border rounded-xl transition-all group ${
+              r.active
+                ? 'bg-slate-800/40 border-slate-700/40'
+                : 'bg-slate-900/30 border-slate-800/40 opacity-50'
+            }`}
+          >
+            <div className="flex-1 min-w-0">
+              <p className="text-sm font-medium text-white">{r.label}</p>
+              <p className="text-xs text-slate-600">
+                {fmt(r.amount, r.currency, 2)} ·{' '}
+                {r.recurrence_type === 'monthly'
+                  ? `Le ${r.recurrence_day} du mois`
+                  : `Chaque ${['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'][r.recurrence_day]}`}
+              </p>
+            </div>
+            <button
+              onClick={() => void handleToggle(r.id)}
+              className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all text-xs ${
                 r.active
-                  ? 'bg-slate-800/40 border-slate-700/40'
-                  : 'bg-slate-900/30 border-slate-800/40 opacity-50'
+                  ? 'bg-[var(--color-primary)]/15 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
+                  : 'bg-slate-800 border-slate-700 text-slate-600'
               }`}
             >
-              <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-white">{r.label}</p>
-                <p className="text-xs text-slate-600">
-                  {fmt(r.amount, r.currency, 2)} ·{' '}
-                  {r.recurrence_type === 'monthly'
-                    ? `Le ${r.recurrence_day} du mois`
-                    : `Chaque ${['Lun', 'Mar', 'Mer', 'Jeu', 'Ven', 'Sam', 'Dim'][r.recurrence_day]}`}
+              {r.active ? <CheckCircle className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
+            </button>
+            <button
+              onClick={() => void handleDelete(r.id)}
+              className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
+            >
+              <Trash2 className="w-3.5 h-3.5" />
+            </button>
+          </div>
+        )
+
+        return (
+          <div className="flex flex-col gap-4">
+            {abonnements.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-600 px-1">
+                  Abonnements
                 </p>
+                {abonnements.map(renderRow)}
               </div>
-              <button
-                onClick={() => void handleToggle(r.id)}
-                className={`w-8 h-8 rounded-xl flex items-center justify-center border transition-all text-xs ${
-                  r.active
-                    ? 'bg-[var(--color-primary)]/15 border-[var(--color-primary)]/30 text-[var(--color-primary)]'
-                    : 'bg-slate-800 border-slate-700 text-slate-600'
-                }`}
-              >
-                {r.active ? <CheckCircle className="w-3.5 h-3.5" /> : <X className="w-3.5 h-3.5" />}
-              </button>
-              <button
-                onClick={() => void handleDelete(r.id)}
-                className="opacity-0 group-hover:opacity-100 p-1.5 rounded-lg text-slate-600 hover:text-red-400 hover:bg-red-500/10 transition-all"
-              >
-                <Trash2 className="w-3.5 h-3.5" />
-              </button>
-            </div>
-          ))}
+            )}
+            {revenus.length > 0 && (
+              <div className="flex flex-col gap-2">
+                <div className="flex items-center gap-1.5 px-1">
+                  <TrendingUp className="w-3 h-3 text-emerald-400" />
+                  <p className="text-[10px] font-semibold uppercase tracking-widest text-emerald-600">
+                    Sources de revenus
+                  </p>
+                </div>
+                {revenus.map(renderRow)}
+              </div>
+            )}
+          </div>
+        )
+      })()}
+    </div>
+  )
+}
+
+// ── Tab: Enveloppes ───────────────────────────────────────────────────────────
+
+function EnvelopesTab({
+  budgetId,
+  budgetCurrency,
+  categories
+}: {
+  budgetId: number
+  budgetCurrency: string
+  categories: BudgetCategory[]
+}): React.JSX.Element {
+  const [envelopes,  setEnvelopes]  = useState<BudgetEnvelopeItem[]>([])
+  const [loading,    setLoading]    = useState(true)
+  const [editingId,  setEditingId]  = useState<number | null>(null)
+  const [editVal,    setEditVal]    = useState('')
+  const [saving,     setSaving]     = useState(false)
+  const [newCatId,   setNewCatId]   = useState('')
+  const [newLimit,   setNewLimit]   = useState('')
+  const [adding,     setAdding]     = useState(false)
+
+  const load = useCallback(async () => {
+    const items = await window.api.budget.listCategoryLimits(budgetId)
+    // Fetch current month spending to enrich each item
+    const spending = await window.api.budget.categorySpending(budgetId)
+    const enriched: BudgetEnvelopeItem[] = items.map((item) => {
+      const cat = spending.categories.find((c) => c.category_id === item.category_id)
+      return {
+        id: item.id,
+        budget_id: item.budget_id,
+        category_id: item.category_id,
+        monthly_limit: item.monthly_limit,
+        current_month_spent: cat?.spent ?? 0,
+        category_name:  item.category_name,
+        category_color: item.category_color,
+        category_icon:  item.category_icon,
+      }
+    })
+    setEnvelopes(enriched)
+    setLoading(false)
+  }, [budgetId])
+
+  useEffect(() => { void load() }, [load])
+
+  // Categories not yet assigned to an envelope
+  const usedCatIds = new Set(envelopes.map((e) => e.category_id))
+  const availableCats = categories.filter((c) => !usedCatIds.has(c.id))
+
+  const handleSave = async (catId: number): Promise<void> => {
+    const val = parseFloat(editVal)
+    if (isNaN(val) || val <= 0) { setEditingId(null); return }
+    setSaving(true)
+    await window.api.budget.setCategoryLimit({ budget_id: budgetId, category_id: catId, monthly_limit: val })
+    setSaving(false)
+    setEditingId(null)
+    await load()
+  }
+
+  const handleDelete = async (catId: number): Promise<void> => {
+    await window.api.budget.deleteCategoryLimit({ budget_id: budgetId, category_id: catId })
+    await load()
+  }
+
+  const handleAdd = async (): Promise<void> => {
+    if (!newCatId || !newLimit) return
+    const val = parseFloat(newLimit)
+    if (isNaN(val) || val <= 0) return
+    setAdding(true)
+    await window.api.budget.setCategoryLimit({ budget_id: budgetId, category_id: Number(newCatId), monthly_limit: val })
+    setNewCatId('')
+    setNewLimit('')
+    setAdding(false)
+    await load()
+  }
+
+  const totalPlanned = envelopes.reduce((s, e) => s + e.monthly_limit, 0)
+  const totalSpent   = envelopes.reduce((s, e) => s + e.current_month_spent, 0)
+
+  return (
+    <div className="flex flex-col gap-4">
+
+      {/* ── Formulaire ajout ── */}
+      <div className="bg-slate-800/60 border border-slate-700/50 rounded-xl p-4 flex flex-col gap-3">
+        <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider">
+          Ajouter une enveloppe
+        </p>
+        <p className="text-xs text-slate-600">
+          Une enveloppe définit un budget mensuel max pour une catégorie de dépenses.
+        </p>
+        <div className="grid grid-cols-2 gap-2">
+          <select
+            value={newCatId}
+            onChange={(e) => setNewCatId(e.target.value)}
+            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-[var(--color-primary)] cursor-pointer"
+          >
+            <option value="">Catégorie…</option>
+            {availableCats.map((c) => (
+              <option key={c.id} value={c.id}>
+                {c.icon} {c.name}
+              </option>
+            ))}
+          </select>
+          <input
+            type="number"
+            value={newLimit}
+            onChange={(e) => setNewLimit(e.target.value)}
+            onKeyDown={(e) => { if (e.key === 'Enter') void handleAdd() }}
+            placeholder={`Limite / mois (${budgetCurrency})`}
+            className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-[var(--color-primary)] transition-colors"
+          />
         </div>
+        <button
+          onClick={() => void handleAdd()}
+          disabled={adding || !newCatId || !newLimit}
+          className="flex items-center justify-center gap-2 py-2.5 bg-[var(--color-primary)] hover:opacity-90 disabled:opacity-40 rounded-xl text-white text-sm font-medium transition-all"
+        >
+          {adding ? <Loader2 className="w-4 h-4 animate-spin" /> : <Plus className="w-4 h-4" />}
+          Ajouter l'enveloppe
+        </button>
+      </div>
+
+      {/* ── Liste des enveloppes ── */}
+      {loading ? (
+        <div className="flex justify-center py-8">
+          <Loader2 className="w-5 h-5 text-slate-500 animate-spin" />
+        </div>
+      ) : envelopes.length === 0 ? (
+        <div className="flex flex-col items-center py-10 text-slate-600 gap-2">
+          <Target className="w-8 h-8" />
+          <p className="text-sm">Aucune enveloppe définie</p>
+          <p className="text-xs text-slate-700">
+            Ajoute une enveloppe pour limiter tes dépenses par catégorie.
+          </p>
+        </div>
+      ) : (
+        <>
+          {/* Résumé mois courant */}
+          <div className="grid grid-cols-2 gap-2">
+            <div className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-3">
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Budget enveloppes</p>
+              <p className="text-base font-bold text-[var(--color-primary)] mt-1">{fmt(totalPlanned, budgetCurrency)} / mois</p>
+            </div>
+            <div className={`rounded-xl p-3 border ${
+              totalSpent > totalPlanned
+                ? 'bg-red-500/10 border-red-500/30'
+                : 'bg-slate-800/60 border-slate-700/40'
+            }`}>
+              <p className="text-[10px] font-semibold uppercase tracking-widest text-slate-500">Dépensé ce mois</p>
+              <p className={`text-base font-bold mt-1 ${totalSpent > totalPlanned ? 'text-red-400' : 'text-slate-200'}`}>
+                {fmt(totalSpent, budgetCurrency, 2)}
+              </p>
+            </div>
+          </div>
+
+          {/* Cards enveloppes */}
+          <div className="flex flex-col gap-2">
+            {envelopes.map((env) => {
+              const spentPct = env.monthly_limit > 0
+                ? Math.min(100, Math.round((env.current_month_spent / env.monthly_limit) * 100))
+                : 0
+              const isOver = env.current_month_spent >= env.monthly_limit
+              const isWarn = !isOver && env.current_month_spent >= env.monthly_limit * 0.8
+              const barCol = isOver ? 'bg-red-500' : isWarn ? 'bg-amber-500' : 'bg-[var(--color-primary)]'
+              const isEditing = editingId === env.category_id
+
+              return (
+                <div
+                  key={env.id}
+                  className="bg-slate-800/60 border border-slate-700/40 rounded-xl p-3 flex flex-col gap-2"
+                >
+                  <div className="flex items-center gap-3">
+                    {/* Icon */}
+                    <div
+                      className="w-8 h-8 rounded-xl flex items-center justify-center text-base shrink-0"
+                      style={{ background: `${env.category_color}22` }}
+                    >
+                      {env.category_icon}
+                    </div>
+                    {/* Name */}
+                    <div className="flex-1 min-w-0">
+                      <p className="text-sm font-semibold text-slate-200 truncate">{env.category_name}</p>
+                      <p className="text-[11px] text-slate-600">
+                        {env.current_month_spent > 0
+                          ? `${fmt(env.current_month_spent, budgetCurrency, 2)} dépensé`
+                          : 'Rien dépensé ce mois'}
+                      </p>
+                    </div>
+                    {/* Limit + actions */}
+                    {isEditing ? (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <input
+                          type="number"
+                          value={editVal}
+                          onChange={(e) => setEditVal(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter') void handleSave(env.category_id)
+                            if (e.key === 'Escape') setEditingId(null)
+                          }}
+                          autoFocus
+                          className="w-20 bg-slate-900 border border-[var(--color-primary)]/50 rounded-lg px-2 py-1 text-xs text-white text-right focus:outline-none"
+                          placeholder="Montant"
+                        />
+                        <button
+                          onClick={() => void handleSave(env.category_id)}
+                          disabled={saving}
+                          className="p-1.5 rounded-lg text-emerald-400 hover:bg-emerald-500/10 transition-colors"
+                        >
+                          {saving ? <Loader2 className="w-3 h-3 animate-spin" /> : <Check className="w-3 h-3" />}
+                        </button>
+                        <button
+                          onClick={() => setEditingId(null)}
+                          className="p-1.5 rounded-lg text-slate-600 hover:text-slate-300 transition-colors"
+                        >
+                          <X className="w-3 h-3" />
+                        </button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <p className="text-sm font-bold text-[var(--color-primary)]">
+                          {fmt(env.monthly_limit, budgetCurrency)}
+                        </p>
+                        <span className="text-[10px] text-slate-600">/mois</span>
+                        <button
+                          onClick={() => { setEditingId(env.category_id); setEditVal(String(env.monthly_limit)) }}
+                          className="p-1.5 rounded-lg text-slate-700 hover:text-slate-300 hover:bg-slate-700/50 transition-colors"
+                        >
+                          <Pencil className="w-3 h-3" />
+                        </button>
+                        <button
+                          onClick={() => void handleDelete(env.category_id)}
+                          className="p-1.5 rounded-lg text-slate-700 hover:text-red-400 hover:bg-red-500/10 transition-colors"
+                        >
+                          <Trash2 className="w-3 h-3" />
+                        </button>
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Progress bar */}
+                  <div className="flex items-center gap-2">
+                    <div className="flex-1 h-2 bg-slate-900 rounded-full overflow-hidden">
+                      <div
+                        className={`h-full rounded-full transition-all duration-500 ${barCol}`}
+                        style={{ width: `${spentPct}%` }}
+                      />
+                    </div>
+                    <span className={`text-[10px] font-semibold w-8 text-right shrink-0 ${
+                      isOver ? 'text-red-400' : isWarn ? 'text-amber-400' : 'text-slate-500'
+                    }`}>
+                      {spentPct}%
+                    </span>
+                    <span className="text-[10px] text-slate-600 shrink-0">
+                      {fmt(env.monthly_limit - env.current_month_spent, budgetCurrency)} restant
+                    </span>
+                  </div>
+                </div>
+              )
+            })}
+          </div>
+        </>
       )}
     </div>
   )
@@ -1403,7 +2084,7 @@ function RecurringTab({
 function AiTab({ budgetId }: { budgetId: number }): React.JSX.Element {
   const [streamText, setStreamText] = useState('')
   const [loading,    setLoading]    = useState(false)
-  const [done,       setDone]       = useState(false)
+  const [_done,      setDone]       = useState(false)
   const bottomRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -1477,14 +2158,15 @@ function AiTab({ budgetId }: { budgetId: number }): React.JSX.Element {
 
 // ── Page BudgetDetail ─────────────────────────────────────────────────────────
 
-type Tab = 'overview' | 'transactions' | 'extras' | 'recurring' | 'ai'
+type Tab = 'overview' | 'transactions' | 'extras' | 'recurring' | 'envelopes' | 'ai'
 
 const TABS: { id: Tab; label: string; icon: React.ElementType }[] = [
-  { id: 'overview', label: 'Vue', icon: Target },
-  { id: 'transactions', label: 'Transactions', icon: List },
-  { id: 'extras', label: 'Hors-budget', icon: Tag },
-  { id: 'recurring', label: 'Récurrents', icon: Repeat },
-  { id: 'ai', label: 'IA', icon: Sparkles }
+  { id: 'overview',      label: 'Vue',         icon: Target },
+  { id: 'transactions',  label: 'Transactions', icon: List },
+  { id: 'extras',        label: 'Hors-budget',  icon: Tag },
+  { id: 'recurring',     label: 'Récurrents',   icon: Repeat },
+  { id: 'envelopes',     label: 'Enveloppes',   icon: PiggyBank },
+  { id: 'ai',            label: 'IA',           icon: Sparkles }
 ]
 
 export function BudgetDetail(): React.JSX.Element {
@@ -1635,7 +2317,7 @@ export function BudgetDetail(): React.JSX.Element {
 
       {/* ── Contenu ── */}
       <div className="flex-1 overflow-auto px-6 py-5">
-        {tab === 'overview' && <OverviewTab summary={summary} budgetId={budgetId} />}
+        {tab === 'overview' && <OverviewTab summary={summary} budgetId={budgetId} onRefresh={load} />}
         {tab === 'transactions' && (
           <TransactionsTab
             budgetId={budgetId}
@@ -1653,8 +2335,25 @@ export function BudgetDetail(): React.JSX.Element {
             categories={categories}
           />
         )}
+        {tab === 'envelopes' && (
+          <EnvelopesTab
+            budgetId={budgetId}
+            budgetCurrency={budget.currency}
+            categories={categories}
+          />
+        )}
         {tab === 'ai' && <AiTab budgetId={budgetId} />}
       </div>
+
+      {summary.pending_checkup && (
+        <CheckupModal
+          checkup={summary.pending_checkup}
+          budgetId={budgetId}
+          budgetLibreMonthly={summary.budget_libre_monthly}
+          currency={summary.budget.currency}
+          onAcknowledge={() => void load()}
+        />
+      )}
     </div>
   )
 }

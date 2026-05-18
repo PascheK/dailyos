@@ -159,6 +159,9 @@ const api = {
       ipcRenderer.on('budget:wizard:done', h)
       return () => ipcRenderer.removeListener('budget:wizard:done', h)
     },
+    checkupDetail:      (budgetId: number, month: string) => ipcRenderer.invoke('budget:checkup:detail', { budgetId, month }),
+    acknowledgeCheckup: (id: number)                      => ipcRenderer.invoke('budget:checkup:acknowledge', id),
+    monthlyData:        (budgetId: number)                => ipcRenderer.invoke('budget:monthlyData', budgetId),
   },
   settings: {
     get:          ()                                          => ipcRenderer.invoke('settings:get'),

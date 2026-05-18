@@ -7,7 +7,8 @@ import type { AppBoard, AppBoardFull } from './types/whiteboard'
 import type {
   AppBudget, BudgetSummary, BudgetWidgetData, BudgetTransaction,
   BudgetExtraItem, BudgetCategory, BudgetRecurring, BudgetGoal,
-  BudgetCategoryLimit, CategorySpendingResult,
+  BudgetCategoryLimit, CategorySpendingResult, BudgetCheckupDetail,
+  BudgetMonthlyData,
   CreateBudgetPayload, NewTransactionPayload, NewExtraPayload,
   NewCategoryPayload, NewRecurringPayload
 } from './types/budget'
@@ -168,6 +169,9 @@ declare global {
         wizardStart:        (p: object)                              => Promise<{ budgetId: number; ok: boolean }>
         onWizardChunk:      (cb: (chunk: string) => void)           => () => void
         onWizardDone:       (cb: (data: { budgetId: number }) => void) => () => void
+        checkupDetail:      (budgetId: number, month: string)        => Promise<BudgetCheckupDetail | null>
+        acknowledgeCheckup: (id: number)                             => Promise<boolean>
+        monthlyData:        (budgetId: number)                       => Promise<BudgetMonthlyData[]>
       }
       updater: {
         checkNow:  () => Promise<{ ok?: boolean; error?: boolean; skipped?: boolean }>

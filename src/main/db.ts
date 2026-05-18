@@ -338,4 +338,38 @@ if (version < 8) {
   console.log('[DB] Migration v8 terminée.')
 }
 
+if (version < 9) {
+  // Migration v8 → v9 : objectif de réserve sur les budgets
+  console.log('[DB] Migration v9 : savings_goal sur les budgets...')
+  db.exec(`ALTER TABLE budgets ADD COLUMN savings_goal INTEGER DEFAULT 0`)
+  db.pragma('user_version = 9')
+  console.log('[DB] Migration v9 terminée.')
+}
+
+if (version < 10) {
+  // Migration v9 → v10 : sources de revenus, checkup mensuel, enveloppes
+  console.log('[DB] Migration v10 : is_revenue + checkup mensuel...')
+  db.transaction(() => {
+    // is_revenue sur les récurrents (0 = dépense, 1 = source de revenu)
+    db.exec(`ALTER TABLE budget_recurring ADD COLUMN is_revenue INTEGER DEFAULT 0`)
+    // Checkup mensuel sur les budgets
+    db.exec(`ALTER TABLE budgets ADD COLUMN checkup_day INTEGER DEFAULT 6`)
+    db.exec(`ALTER TABLE budgets ADD COLUMN last_checkup_month TEXT DEFAULT NULL`)
+    // Table des checkups mensuels
+    db.exec(`
+      CREATE TABLE IF NOT EXISTS budget_monthly_checkups (
+        id             INTEGER PRIMARY KEY AUTOINCREMENT,
+        budget_id      INTEGER NOT NULL REFERENCES budgets(id) ON DELETE CASCADE,
+        month          TEXT NOT NULL,          -- YYYY-MM
+        rollover_amount REAL NOT NULL DEFAULT 0,
+        acknowledged   INTEGER NOT NULL DEFAULT 0,
+        created_at     TEXT DEFAULT (datetime('now')),
+        UNIQUE(budget_id, month)
+      )
+    `)
+    db.pragma('user_version = 10')
+  })()
+  console.log('[DB] Migration v10 terminée.')
+}
+
 console.log('[DB] Initialisée :', DB_PATH)
